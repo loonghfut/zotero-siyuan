@@ -580,6 +580,60 @@ section("Chrome package");
   );
 }
 
+/* --------------------- 12. the reader's sidebar contract ------------------ */
+
+section("Reader sidebar contract");
+{
+  // The reader puts every append() call into a box of its own, so the
+  // button and the marker have to be appended together — otherwise they end
+  // up in two boxes, neither of them can see the other, and the sidebar
+  // shows two markers.
+  const source = readFileSync(join(ROOT, "src", "index.js"), "utf8");
+  const renderHandler = source.match(
+    /_onRenderSidebarAnnotationHeader\(event\)\s*\{([\s\S]*?)\r?\n  \}\r?\n/,
+  );
+  const body = renderHandler ? renderHandler[1] : "";
+  const appendCalls = (body.match(/event\.append\(/g) || []).length;
+  check(
+    "the button and the marker are appended in one call",
+    appendCalls === 1 && body.includes("event.append(...nodes)"),
+    `${appendCalls} append() calls`,
+  );
+  check(
+    "the marker is only removed when it was put in by hand",
+    source.includes('querySelectorAll("[data-zsi-manual]")'),
+  );
+  check(
+    "the lookup for an existing marker covers the whole document",
+    source.includes("_existingMarker") &&
+      source.includes('.zotero-siyuan-sent-link'),
+  );
+  check(
+    "the context menu does not use an undefined document",
+    // `doc` has to come from the reader, not from the event.
+    source.includes("const doc = this._readerDoc(reader);"),
+  );
+  check(
+    "the reader's document is remembered while the sidebar renders",
+    source.includes("this._readerDocs.set(event.reader, doc)"),
+  );
+  check(
+    "a reader that was drawn before the plugin gets the button",
+    source.includes("_patchReaderSidebars") && source.includes("_annotationKeyOf"),
+  );
+  check(
+    "only the box of an annotation is patched, not the toolbar's",
+    // The reader has boxes of its own — the toolbar, for one. Only the
+    // preview of an annotation carries its key.
+    /_annotationKeyOf\(box\)\s*\{[\s\S]*?closest\("\.preview"\)/.test(source),
+  );
+  check(
+    "the button is built in one place, for both ways in",
+    source.includes("_createButton(doc, annotation, event.reader)") &&
+      source.includes("_createButton(doc, this._annotationFromItem(item), reader)"),
+  );
+}
+
 /* --------------------------- 4. packaged XPI ---------------------------- */
 
 section("Packaged XPI");

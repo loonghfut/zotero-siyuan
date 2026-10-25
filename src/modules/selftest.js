@@ -603,7 +603,7 @@ export async function runSelfTest({
 				rendered: !!link,
 				href: link ? link.getAttribute("href") : "",
 				title: link ? link.getAttribute("aria-label") : "",
-				hasIcon: !!(link && link.querySelector("img")),
+				hasIcon: !!(link && link.querySelector("svg")),
 			};
 		});
 
@@ -636,11 +636,17 @@ export async function runSelfTest({
 			const key = "SELFKEY2";
 			addon._index.add(key, "20260101000000-abcdefg");
 
-			// The reader renders the sidebar with React, which only knows
-			// about the nodes it created. A marker put in by hand — the one
-			// that appears right after a send — must not survive next to
-			// the one React renders.
+			// The reader's sidebar puts everything a plugin appends into a
+			// box of its own, wipes that box on every render, and gives
+			// every single append() call a box of its own inside it. That
+			// is what the reader really does — see its custom-sections
+			// component — and it is why the button and the marker have to
+			// be appended together.
+			const box = doc.createElement("div");
+			box.className = "custom-sections";
+			doc.body.appendChild(box);
 			const render = () => {
+				box.replaceChildren();
 				addon._onRenderSidebarAnnotationHeader({
 					doc,
 					params: {
@@ -648,31 +654,116 @@ export async function runSelfTest({
 						annotation: { ...annotation, id: key, tags: [] },
 					},
 					reader: { itemID: attachmentID },
-					append(node) {
-						doc.body.appendChild(node);
+					append(...nodes) {
+						const section = doc.createElement("div");
+						section.className = "section";
+						section.append(...nodes);
+						box.appendChild(section);
+					},
+				});
+			};
+			const count = () =>
+				doc.body.querySelectorAll(".zotero-siyuan-sent-link").length;
+
+			render();
+			const afterFirst = count();
+
+			// The hand-made marker, as it appears right after a send.
+			addon._updateRenderedMarkers(doc);
+			const afterManual = count();
+
+			// The reader re-renders the header.
+			render();
+			const afterRerender = count();
+
+			// And once more, to be sure it settles.
+			render();
+			const afterThird = count();
+
+			// The reader must not put the button and the marker into two
+			// different boxes — that is what made the sidebar show two
+			// markers in the first place.
+			const boxes = box.children.length;
+
+			addon._index.blocks.delete(key);
+			return {
+				afterFirst,
+				afterManual,
+				afterRerender,
+				afterThird,
+				boxes,
+			};
+		});
+
+		/* --- 3d-2. the marker shows up right after a batch send ---------- */
+		await step("a batch send shows the markers right away", () => {
+			const doc = win.document.implementation.createHTMLDocument(
+				"zotero-siyuan-selftest-batch",
+			);
+			const key = "SELFKEY3";
+			const reader = { itemID: attachmentID };
+
+			const box = doc.createElement("div");
+			box.className = "custom-sections";
+			doc.body.appendChild(box);
+			const render = () => {
+				box.replaceChildren();
+				addon._onRenderSidebarAnnotationHeader({
+					doc,
+					params: {
+						type: "SidebarAnnotationHeader",
+						annotation: { ...annotation, id: key, tags: [] },
+					},
+					reader,
+					append(...nodes) {
+						const section = doc.createElement("div");
+						section.className = "section";
+						section.append(...nodes);
+						box.appendChild(section);
 					},
 				});
 			};
 
+			// The annotation is not in the index yet, so the reader has no
+			// marker to show.
 			render();
-			const afterFirst = doc.body.querySelectorAll(
-				".zotero-siyuan-sent-link",
-			).length;
+			const before = doc.body.querySelectorAll(".zotero-siyuan-sent-link")
+				.length;
 
-			// The hand-made marker, as it appears right after a send.
+			// The context menu has to find the reader's document on its
+			// own — the event does not carry it.
+			const items = [];
+			addon._onCreateAnnotationContextMenu({
+				reader,
+				params: { ids: [key] },
+				append(item) {
+					items.push(item);
+				},
+			});
+			const known = !!addon._readerDoc(reader);
+
+			// The send puts the annotation into the index, and then the
+			// marker has to be on screen without reloading the PDF.
+			addon._index.add(key, "20260101000000-batchg");
 			addon._updateRenderedMarkers(doc);
-			const afterManual = doc.body.querySelectorAll(
+			const afterSend = doc.body.querySelectorAll(
 				".zotero-siyuan-sent-link",
 			).length;
 
-			// React re-renders the header.
+			// And the reader's own render must not add a second one.
 			render();
 			const afterRerender = doc.body.querySelectorAll(
 				".zotero-siyuan-sent-link",
 			).length;
 
 			addon._index.blocks.delete(key);
-			return { afterFirst, afterManual, afterRerender };
+			return {
+				before,
+				afterSend,
+				afterRerender,
+				known,
+				menuItems: items.length,
+			};
 		});
 
 		/* --- 3d. one delegated listener per document ------------------- */
@@ -808,14 +899,255 @@ export async function runSelfTest({
 			return { ...diag, attached, removed: !element.parentNode };
 		});
 
+		/* --- 3f-1. every reader that is open shows the button ------------- */
+		await step("every open reader shows the button", async () => {
+			// A reader that was restored when Zotero started may have drawn
+			// its sidebar before this plugin was awake — say what is on
+			// screen, and what the plugin can do about it.
+			const readers = (Zotero.Reader._readers || []).filter(
+				(r) => r && r.itemID,
+			);
+			const rows = () =>
+				readers.map((r) => {
+					const known = addon._readerDocs.get(r);
+					const d = known || addon._readerDoc(r);
+					return {
+						itemID: r.itemID,
+						known: !!known,
+						reachable: !!d,
+						boxes: d ? d.querySelectorAll(".custom-sections").length : 0,
+						buttons: d
+							? d.querySelectorAll(".zotero-siyuan-annotation-button").length
+							: 0,
+						markers: d
+							? d.querySelectorAll(".zotero-siyuan-sent-link").length
+							: 0,
+					};
+				});
+			const before = rows();
+			await addon._patchReaderSidebars();
+			return { readers: readers.length, before, after: rows() };
+		});
+
+		/* --- 3f-2. a reader that was drawn without the plugin ------------- */
+		await step("a reader that was drawn without the plugin gets the button", async () => {
+			// A reader that was restored when Zotero started draws its
+			// sidebar before the plugins are up — the reader's own event
+			// never arrives, so the button has to be put in by hand.
+			const doc = win.document.implementation.createHTMLDocument(
+				"zotero-siyuan-selftest-patch",
+			);
+			const key = await addon._resolveAnnotationKey(annotation);
+
+			// The reader's own markup: the page label of the annotation
+			// sits next to its header, and the header has a box of its own.
+			const preview = doc.createElement("div");
+			preview.className = "preview";
+			const header = doc.createElement("header");
+			const page = doc.createElement("div");
+			page.id = `page_${key}`;
+			const box = doc.createElement("div");
+			box.className = "custom-sections";
+			header.appendChild(page);
+			header.appendChild(box);
+			preview.appendChild(header);
+			doc.body.appendChild(preview);
+
+			const reader = { itemID: 1, _iframeWindow: { document: doc } };
+			const before = doc.querySelectorAll(".zotero-siyuan-annotation-button")
+				.length;
+			const result = await addon._patchReaderSidebars([reader]);
+			const after = doc.querySelectorAll(".zotero-siyuan-annotation-button")
+				.length;
+			const button = doc.querySelector(".zotero-siyuan-annotation-button");
+			// And a second time must not add a second button.
+			await addon._patchReaderSidebars([reader]);
+			const again = doc.querySelectorAll(".zotero-siyuan-annotation-button")
+				.length;
+
+			return {
+				before,
+				after,
+				again,
+				patched: result.patched,
+				key: button ? button.getAttribute("data-zsi-annotation") : "",
+			};
+		});
+
+		/* --- 3f. what the real reader shows ------------------------------ */
+		await step("the real reader shows one marker per annotation", async () => {
+			// Everything above runs in a synthetic document. Only the real
+			// reader can show whether the markers behave.
+			//
+			// Any reader that is showing its annotations will do — the
+			// reader does not draw them until the PDF is ready, and the
+			// section of the sidebar can be folded away.
+			let doc = null;
+			let reader = null;
+			let drawn = 0;
+			const deadline = Date.now() + 45000;
+			while (Date.now() < deadline && !drawn) {
+				for (const r of Zotero.Reader._readers || []) {
+					if (!r || !r.itemID) {
+						continue;
+					}
+					const d = addon._readerDoc(r);
+					if (!d || !d.querySelectorAll) {
+						continue;
+					}
+					// Only the boxes of the annotations count — the reader
+					// has boxes of its own, too.
+					const n = [...d.querySelectorAll(".custom-sections")].filter(
+						(b) => !!addon._annotationKeyOf(b),
+					).length;
+					if (n > drawn) {
+						doc = d;
+						reader = r;
+						drawn = n;
+					}
+				}
+				if (!drawn) {
+					await sleep(500);
+				}
+			}
+			if (!doc || !drawn) {
+				// The reader did not show its annotations — that has nothing
+				// to do with this plugin.
+				return { drawn: 0, note: "no reader showed its annotations" };
+			}
+			await sleep(2000);
+
+			// Every annotation header gets a box of the reader's own, and
+			// the button and its marker have to share that box — otherwise
+			// the sidebar shows the marker twice.
+			const buttons = [...doc.querySelectorAll(".zotero-siyuan-annotation-button")];
+			const boxes = buttons.map((b) => ({
+				key: b.getAttribute("data-zsi-annotation"),
+				markers: b.parentNode
+					? b.parentNode.querySelectorAll(".zotero-siyuan-sent-link").length
+					: 0,
+			}));
+			const split = boxes.filter((b) => b.markers > 1).length;
+
+			// Count what is on screen before anything is sent.
+			const before = doc.querySelectorAll(".zotero-siyuan-sent-link").length;
+
+			// Send one annotation for real, through the reader's own button,
+			// and watch the marker appear.
+			//
+			// This send is the reader's own, so the bookkeeping of the main
+			// flow is put back afterwards — otherwise the two sends would
+			// mix up each other's results.
+			const capturedBefore = { ...captured };
+			clicked = false;
+			const button = doc.querySelector(".zotero-siyuan-annotation-button");
+			const key = button.getAttribute("data-zsi-annotation");
+			button.click();
+
+			// Wait for the send to finish — the plugin says so itself.
+			const sendDeadline = Date.now() + 30000;
+			while (Date.now() < sendDeadline && addon._sending) {
+				await sleep(200);
+			}
+			await sleep(500);
+
+			const links = [...doc.querySelectorAll(".zotero-siyuan-sent-link")];
+			const forKey = links.filter(
+				(link) => link.getAttribute("data-zsi-for") === key,
+			).length;
+			// The marker right next to the button.
+			const nextToButton = button.parentNode
+				? button.parentNode.querySelectorAll(".zotero-siyuan-sent-link").length
+				: 0;
+
+			// What is on screen, key by key.
+			const byKey = {};
+			for (const link of links) {
+				const k = link.getAttribute("data-zsi-for") || "?";
+				byKey[k] = byKey[k] || { total: 0, manual: 0, boxes: new Set() };
+				byKey[k].total++;
+				if (link.getAttribute("data-zsi-manual")) {
+					byKey[k].manual++;
+				}
+				const box = link.closest ? link.closest(".custom-sections") : null;
+				byKey[k].boxes.add(
+					box
+						? [...doc.querySelectorAll(".custom-sections")].indexOf(box)
+						: -1,
+				);
+			}
+			const buttonsByKey = {};
+			for (const b of doc.querySelectorAll("[data-zsi-annotation]")) {
+				const k = b.getAttribute("data-zsi-annotation") || "?";
+				buttonsByKey[k] = (buttonsByKey[k] || 0) + 1;
+			}
+			// Where every box of the reader sits — the same annotation can
+			// show up more than once.
+			const allBoxes = [...doc.querySelectorAll(".custom-sections")].map(
+				(box, i) => {
+					const chain = [];
+					let node = box;
+					for (let d = 0; d < 5 && node; d++) {
+						chain.push(node.className || node.id || node.tagName);
+						node = node.parentNode;
+					}
+					return {
+						i,
+						key: addon._annotationKeyOf(box),
+						buttons: box.querySelectorAll(".zotero-siyuan-annotation-button")
+							.length,
+						chain,
+					};
+				},
+			);
+			const detail = {};
+			for (const k of Object.keys(byKey)) {
+				detail[k] = {
+					total: byKey[k].total,
+					manual: byKey[k].manual,
+					boxes: [...byKey[k].boxes],
+					buttons: buttonsByKey[k] || 0,
+				};
+			}
+
+			// Leave nothing behind.
+			const blockID = addon._index.get(key);
+			if (blockID) {
+				await cli.deleteBlock(blockID);
+			}
+			addon._index.blocks.delete(key);
+
+			// Give the main flow its own bookkeeping back.
+			Object.assign(captured, capturedBefore);
+			clicked = false;
+
+			return {
+				reader: reader.itemID,
+				buttons: buttons.length,
+				split,
+				before,
+				after: links.length,
+				forKey,
+				nextToButton,
+				manual: doc.querySelectorAll("[data-zsi-manual]").length,
+				detail,
+				allBoxes,
+				blockID,
+			};
+		});
+
 		/* --- 4. click it, like a user would ------------------------------ */
 		button.click();
 
+		// Wait for *this* click to finish — not just for the handler to
+		// have been called, but for the write to be complete.
+		const written = () =>
+			captured.stage === "appended" || captured.stage === "dry run done";
 		const deadline = Date.now() + timeout;
-		while (!clicked && Date.now() < deadline) {
+		while ((!clicked || !written()) && Date.now() < deadline) {
 			await sleep(100);
 		}
-		if (!clicked) {
+		if (!clicked || !written()) {
 			throw new Error(
 				`the click did not finish within ${timeout} ms (stage: ${captured.stage})`,
 			);

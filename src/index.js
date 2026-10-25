@@ -76,6 +76,10 @@ class ZoteroSiYuanAddon {
     // the attachments whose blocks are in the index.
     this._delegatedDocs = new WeakSet();
     this._indexedAttachments = new Set();
+    // The document of every reader that has rendered a sidebar. The reader
+    // event for the context menu does not carry the document, so it is
+    // remembered here while the sidebar renders.
+    this._readerDocs = new WeakMap();
     // Resolving a Fluent message is not free, and a sidebar can render
     // hundreds of headers — so the labels are looked up once.
     this._labels = null;
@@ -113,6 +117,10 @@ class ZoteroSiYuanAddon {
       "renderSidebarAnnotationHeader",
       this._onRenderSidebarAnnotationHeader,
       PLUGIN_ID,
+    );
+
+    Zotero.debug(
+      "ZoteroSiYuan: the reader listener is registered",
     );
 
     // The reader's context menu for annotations: the selected annotations
@@ -160,6 +168,10 @@ class ZoteroSiYuanAddon {
     // Build the index of already-sent annotations in the background, so the
     // reader can offer a way back to the SiYuan block.
     this.refreshIndex();
+
+    // A reader that was restored when Zotero started may have drawn its
+    // sidebar before this plugin was awake — look after those.
+    this._startSidebarWatcher();
 
     // The desktop app is normally started directly, so no confirmation
     // dialog appears. This only matters for the fallback path — and it is
@@ -216,6 +228,66 @@ class ZoteroSiYuanAddon {
     // of listeners.
     this._ensureDelegation(doc);
 
+    // Say it once per reader, so the log shows whether the sidebar was
+    // rendered after the plugin started.
+    if (!this._announcedDocs) {
+      this._announcedDocs = new WeakSet();
+    }
+    if (!this._announcedDocs.has(doc)) {
+      this._announcedDocs.add(doc);
+      Zotero.debug("ZoteroSiYuan: the reader's sidebar was rendered");
+    }
+
+    // Remember the document: the context menu event does not carry it, and
+    // the batch send needs it to add the markers right away.
+    if (event.reader && typeof event.reader === "object") {
+      try {
+        this._readerDocs.set(event.reader, doc);
+      }
+      catch (e) {
+        // A reader that cannot be a weak map key — not worth failing over.
+      }
+    }
+
+    const button = this._createButton(doc, annotation, event.reader);
+    const nodes = [button];
+
+    // Already sent? Offer a way back to the SiYuan block. The mapping comes
+    // from the workspace, so it works on every machine and leaves no trace
+    // in the Zotero library.
+    const sentBlockID = this._index.get(annotation.id);
+    if (sentBlockID) {
+      // A marker that was put in by hand — the one that appears right after
+      // a send — is invisible to the reader, so it would stand next to the
+      // one rendered here and the sidebar would show two. Drop the
+      // hand-made one first.
+      this._dropManualLinks(doc, annotation.id);
+      nodes.push(this._createSentLink(doc, sentBlockID, annotation.id));
+    }
+
+    // append() must be called synchronously, before this handler returns.
+    //
+    // The button and the marker go in **one** call on purpose: the reader
+    // wraps every single append() call in a box of its own, so two calls
+    // would put the button and the marker into two different boxes — and
+    // then neither of them can see the other.
+    event.append(...nodes);
+
+    // Make sure this PDF's blocks are in the index. The sidebar is
+    // rendered synchronously, so this happens in the background — and the
+    // markers are added the moment the answer arrives.
+    this._ensureAttachmentIndexed(event.reader, doc);
+  }
+
+  /**
+   * The button that sends an annotation to SiYuan.
+   *
+   * @param {Object} doc - the reader document
+   * @param {Object} annotation - the reader's annotation model
+   * @param {Object} reader - the reader instance
+   * @returns {Object} the button
+   */
+  _createButton(doc, annotation, reader) {
     const button = doc.createElement("button");
     button.className = "zotero-siyuan-annotation-button";
     button.type = "button";
@@ -232,34 +304,170 @@ class ZoteroSiYuanAddon {
     button.addEventListener("click", (e) => {
       e.preventDefault();
       e.stopPropagation();
-      this._send(annotation, event.reader, button);
+      this._send(annotation, reader, button);
     });
 
-    // append() must be called synchronously, before this handler returns.
-    event.append(button);
+    return button;
+  }
 
-    // Already sent? Offer a way back to the SiYuan block. The mapping comes
-    // from the workspace, so it works on every machine and leaves no trace
-    // in the Zotero library.
-    const sentBlockID = this._index.get(annotation.id);
-    if (sentBlockID) {
-      // The reader renders the sidebar with React, which only knows about
-      // the nodes it created itself. A marker that was put in by hand — the
-      // one that appears right after a send — is invisible to it, so React
-      // would leave it standing next to its own and the reader would show
-      // two. Drop the hand-made one before React renders its own.
-      this._dropManualLinks(doc, annotation.id);
-      event.append(this._createSentLink(doc, sentBlockID, annotation.id));
+  /**
+   * The document of a reader.
+   *
+   * The reader's context menu event does not carry the document, so it is
+   * remembered while the sidebar renders. The reader's own window is the
+   * fallback for the rare case where the sidebar has not rendered yet.
+   *
+   * @param {Object} reader - the reader instance
+   * @returns {Object} the document
+   */
+  _readerDoc(reader) {
+    // The reader's own window has the document that is on screen right
+    // now — the reader may have drawn it again since.
+    try {
+      const win = reader && reader._iframeWindow;
+      if (win && win.document && win.document.querySelectorAll) {
+        return win.document;
+      }
     }
+    catch (e) {
+      // The reader lives in another process — the sidebar has to render
+      // first, then the document is known.
+    }
+    if (reader && this._readerDocs.has(reader)) {
+      return this._readerDocs.get(reader);
+    }
+    return null;
+  }
 
-    // Make sure this PDF's blocks are in the index. The sidebar is
-    // rendered synchronously, so this happens in the background — and the
-    // markers are added the moment the answer arrives.
-    this._ensureAttachmentIndexed(event.reader, doc);
+  /**
+   * The key of the annotation a header belongs to.
+   *
+   * The reader names the page label of an annotation after its key, and
+   * that label sits next to the header — so the key can be read out of the
+   * page even when the header was drawn without this plugin.
+   *
+   * @param {Object} box - the reader's box for one annotation header
+   * @returns {String} the key
+   */
+  _annotationKeyOf(box) {
+    // The reader has boxes of its own that do not belong to an annotation —
+    // the toolbar has one, for instance. Only the box of an annotation's
+    // preview counts, and the page label of that preview is named after
+    // the annotation's key.
+    const preview = box.closest ? box.closest(".preview") : null;
+    if (!preview || !preview.querySelector) {
+      return "";
+    }
+    const label = preview.querySelector('[id^="page_"]');
+    return label ? label.id.slice("page_".length) : "";
+  }
+
+  /**
+   * Add the button to the headers of a reader that was drawn before this
+   * plugin was awake.
+   *
+   * A reader that was restored when Zotero started draws its sidebar
+   * before the plugins are up, so the reader's own event never reaches
+   * this plugin and the sidebar would show no button at all.
+   *
+   * The reader wipes its box on every render, so the button that is put in
+   * here is replaced by the reader's own one as soon as it draws again.
+   *
+   * @returns {Promise<Object>} how many headers were patched
+   */
+  async _patchReaderSidebars(readers) {
+    const list =
+      readers || (Zotero.Reader && Zotero.Reader._readers) || [];
+    let patched = 0;
+    let pending = 0;
+    for (const reader of list) {
+      if (!reader || !reader.itemID) {
+        continue;
+      }
+      const doc = this._readerDoc(reader);
+      if (!doc || !doc.querySelectorAll) {
+        // The reader is still loading.
+        pending++;
+        continue;
+      }
+      // Remember it, so the rest of the plugin knows the reader as well.
+      try {
+        this._readerDocs.set(reader, doc);
+      }
+      catch (e) {
+        // A reader that cannot be a weak map key.
+      }
+      const boxes = doc.querySelectorAll(".custom-sections");
+      if (!boxes.length) {
+        // A reader without annotations — or one that is not ready yet.
+        pending++;
+        continue;
+      }
+      for (const box of boxes) {
+        if (box.querySelector(".zotero-siyuan-annotation-button")) {
+          continue;
+        }
+        const key = this._annotationKeyOf(box);
+        const item = key ? await this._getAnnotationItem({ id: key }) : null;
+        if (!item) {
+          pending++;
+          continue;
+        }
+        const section = doc.createElement("div");
+        section.className = "section";
+        section.appendChild(this._createButton(doc, this._annotationFromItem(item), reader));
+        const blockID = this._index.get(key);
+        if (blockID) {
+          section.appendChild(this._createSentLink(doc, blockID, key, true));
+        }
+        box.appendChild(section);
+        patched++;
+      }
+    }
+    if (patched) {
+      Zotero.debug(
+        `ZoteroSiYuan: added the button to ${patched} annotation header(s) ` +
+          "that were drawn before the plugin started",
+      );
+    }
+    return { patched, pending };
+  }
+
+  /**
+   * Look after the readers for a while after the start.
+   *
+   * The reader draws its sidebar when the PDF is ready, which can be a
+   * long moment after it was restored — and it can happen before this
+   * plugin is awake.
+   */
+  _startSidebarWatcher() {
+    if (this._watchTimer) {
+      return;
+    }
+    let ticks = 0;
+    const tick = async () => {
+      ticks++;
+      try {
+        await this._patchReaderSidebars();
+      }
+      catch (e) {
+        Zotero.debug(`ZoteroSiYuan: could not patch the sidebars: ${e}`);
+      }
+      // Three minutes is enough for a PDF to load; after that the reader
+      // draws its sidebar on its own and this plugin hears about it.
+      if (ticks < 90) {
+        this._watchTimer = setTimeout(tick, 2000);
+      }
+    };
+    tick();
   }
 
   /**
    * Remove the markers that were inserted by hand for one annotation.
+   *
+   * Only the hand-made ones: the reader wipes its own box on every render
+   * and puts a fresh marker in it, so a hand-made one that is still around
+   * would stand next to it and the sidebar would show two.
    *
    * @param {Object} doc - the reader document
    * @param {String} annotationKey
@@ -268,7 +476,7 @@ class ZoteroSiYuanAddon {
     if (!doc || !doc.querySelectorAll) {
       return;
     }
-    for (const node of doc.querySelectorAll("[data-zsi-for]")) {
+    for (const node of doc.querySelectorAll("[data-zsi-manual]")) {
       if (node.getAttribute("data-zsi-for") === annotationKey) {
         node.remove();
       }
@@ -280,15 +488,19 @@ class ZoteroSiYuanAddon {
    * @param {Object} doc - the reader document
    * @param {String} blockID - the SiYuan block
    * @param {String} annotationKey - the annotation it belongs to
+   * @param {Boolean} manual - true when the plugin inserts it itself
    * @returns {Object} the element
    */
-  _createSentLink(doc, blockID, annotationKey = "") {
+  _createSentLink(doc, blockID, annotationKey = "", manual = false) {
     const link = doc.createElement("a");
     link.className = "zotero-siyuan-sent-link";
     link.href = siyuanBlockLink(blockID);
     link.setAttribute("data-block-id", blockID);
     if (annotationKey) {
       link.setAttribute("data-zsi-for", annotationKey);
+    }
+    if (manual) {
+      link.setAttribute("data-zsi-manual", "1");
     }
     link.style.cssText = SENT_LINK_STYLE;
     const label = this._label(
@@ -331,6 +543,31 @@ class ZoteroSiYuanAddon {
   }
 
   /**
+   * The marker that is already on screen for an annotation.
+   *
+   * The lookup covers the whole reader document, not just the box around
+   * the button: the reader puts every append() call into a box of its own,
+   * so the marker and the button do not have to sit next to each other.
+   * An annotation key is unique, so a document-wide search cannot confuse
+   * two annotations with each other.
+   *
+   * @param {Object} doc - the reader document
+   * @param {String} annotationKey
+   * @returns {Object} the element, or null
+   */
+  _existingMarker(doc, annotationKey) {
+    if (!doc || !doc.querySelectorAll || !annotationKey) {
+      return null;
+    }
+    for (const link of doc.querySelectorAll(".zotero-siyuan-sent-link")) {
+      if (link.getAttribute("data-zsi-for") === annotationKey) {
+        return link;
+      }
+    }
+    return null;
+  }
+
+  /**
    * Add the marker to every annotation of a reader document that has been
    * sent but does not show it yet.
    *
@@ -354,26 +591,26 @@ class ZoteroSiYuanAddon {
       if (!blockID) {
         continue;
       }
+      // One marker per annotation, whether it was rendered by the reader or
+      // put in by hand.
+      const existing = this._existingMarker(doc, key);
+      if (existing) {
+        // A second send creates a new block — make the marker point there.
+        if (existing.getAttribute("data-block-id") !== blockID) {
+          existing.setAttribute("data-block-id", blockID);
+          existing.href = siyuanBlockLink(blockID);
+        }
+        continue;
+      }
       const parent = button.parentNode;
       if (!parent) {
         continue;
       }
-      // One marker per annotation, whether it was rendered by React or put in
-      // by hand.
-      let present = false;
-      for (const link of parent.querySelectorAll(".zotero-siyuan-sent-link")) {
-        if (link.getAttribute("data-zsi-for") === key) {
-          present = true;
-          break;
-        }
-      }
-      if (present) {
-        continue;
-      }
-      parent.insertBefore(
-        this._createSentLink(doc, blockID, key),
-        button.nextSibling,
-      );
+      const marker = this._createSentLink(doc, blockID, key, true);
+      // Right next to the button, and inside the box the reader wipes on
+      // every render — so the reader's own marker replaces it later
+      // instead of standing next to it.
+      parent.insertBefore(marker, button.nextSibling);
       added++;
     }
     return added;
@@ -453,6 +690,9 @@ class ZoteroSiYuanAddon {
       return;
     }
     const reader = event.reader;
+    // The context menu event does not carry the document, so it is looked
+    // up — it is known as soon as the sidebar has rendered once.
+    const doc = this._readerDoc(reader);
     event.append({
       label:
         ids.length === 1
@@ -460,7 +700,7 @@ class ZoteroSiYuanAddon {
           : getString("zoteroSiYuan-menu-send-many", "Send to SiYuan")
               .replace("%d", String(ids.length)),
       onCommand: () => {
-        this._sendMany(ids, reader);
+        this._sendMany(ids, reader, doc);
       },
     });
   }
@@ -550,8 +790,9 @@ class ZoteroSiYuanAddon {
    *
    * @param {String[]} ids - the annotation keys
    * @param {Object} reader - the reader tab
+   * @param {Object} doc - the reader document
    */
-  async _sendMany(ids, reader) {
+  async _sendMany(ids, reader, doc) {
     if (this._sending) {
       return;
     }
@@ -559,6 +800,8 @@ class ZoteroSiYuanAddon {
     let sent = 0;
     let failed = 0;
     let lastBlock = "";
+    // The document of the reader, so the markers can be added right away.
+    const target = doc || this._readerDoc(reader);
     try {
       for (const id of ids) {
         try {
@@ -578,6 +821,10 @@ class ZoteroSiYuanAddon {
           failed++;
           Zotero.logError(`ZoteroSiYuan: ${e}`);
         }
+      }
+      // The markers show up right away, like they do for a single send.
+      if (target) {
+        this._updateRenderedMarkers(target);
       }
       showToast({
         title: getString("zoteroSiYuan-toast-batch-title", "Sent to SiYuan"),
@@ -845,6 +1092,9 @@ class ZoteroSiYuanAddon {
         `ZoteroSiYuan: the index knows ${count} sent annotation(s) ` +
           `(${this._index.blocksScanned} block(s) scanned)`,
       );
+      // Now that the index knows what was sent, the readers that were
+      // patched before can get their markers, too.
+      this._patchReaderSidebars();
       return count;
     }
     catch (e) {
