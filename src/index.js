@@ -17,7 +17,12 @@
 import { SiYuanCLI, siyuanTimestamp } from "./modules/siyuan.js";
 import { SiYuanHTTP } from "./modules/siyuan-http.js";
 import { collectMetadata, siyuanBlockLink } from "./modules/metadata.js";
-import { blockIDFromTags, markSent } from "./modules/sent.js";
+import { SiYuanIndex } from "./modules/siyuan-index.js";
+import {
+	launchExternally,
+	suppressProtocolWarning,
+} from "./modules/siyuan-launcher.js";
+import { createSiyuanIcon } from "./modules/icons.js";
 import { showToast } from "./modules/toast.js";
 import {
 	DEFAULT_TEMPLATE,
@@ -42,13 +47,15 @@ const PLUGIN_ID = "zotero-siyuan@example.com";
  * It is written to the debug log on startup, so it is always possible to
  * tell from a log which build is actually running.
  */
-const BUILD = "sent-marker";
+const BUILD = "index-scan";
 
 const BUTTON_STYLE =
   "display:inline-flex;align-items:center;justify-content:center;width:20px;height:20px;min-width:20px;padding:0;margin:0 2px;border:0;border-radius:3px;background:transparent;color:inherit;cursor:pointer;opacity:.65;";
 
 const SENT_LINK_STYLE =
-  "display:inline-flex;align-items:center;justify-content:center;width:18px;height:18px;min-width:18px;padding:0;margin:0 2px;border:0;border-radius:3px;background:transparent;color:var(--accent-green, #2a7);cursor:pointer;opacity:.9;text-decoration:none;font-size:12px;line-height:1;";
+  "display:inline-flex;align-items:center;justify-content:center;width:18px;height:18px;min-width:18px;padding:0;margin:0 2px;border:0;border-radius:3px;background:transparent;cursor:pointer;opacity:.85;text-decoration:none;";
+
+const SENT_ICON_STYLE = "display:block;flex:none;";
 
 class ZoteroSiYuanAddon {
   constructor() {
@@ -62,6 +69,16 @@ class ZoteroSiYuanAddon {
       env: { NODE_ENV: "development" },
     };
     this._sending = false;
+    // Which SiYuan block an annotation went to. The mapping lives in the
+    // workspace, not in the Zotero library — see `modules/siyuan-index.js`.
+    this._index = new SiYuanIndex();
+    // Reader documents that already have the delegated click listener, and
+    // the attachments whose blocks are in the index.
+    this._delegatedDocs = new WeakSet();
+    this._indexedAttachments = new Set();
+    // Resolving a Fluent message is not free, and a sidebar can render
+    // hundreds of headers — so the labels are looked up once.
+    this._labels = null;
     // Why the last CLI call failed — kept so the error the user sees can
     // name both transports instead of only the last one.
     this._lastCLIError = "";
@@ -139,6 +156,19 @@ class ZoteroSiYuanAddon {
         Zotero.debug(`ZoteroSiYuan: self test failed: ${e}`);
       });
     }
+
+    // Build the index of already-sent annotations in the background, so the
+    // reader can offer a way back to the SiYuan block.
+    this.refreshIndex();
+
+    // The desktop app is normally started directly, so no confirmation
+    // dialog appears. This only matters for the fallback path — and it is
+    // the same preference the dialog's "remember my choice" box writes.
+    if (suppressProtocolWarning()) {
+      Zotero.debug(
+        "ZoteroSiYuan: the browser will not ask before opening siyuan:// links",
+      );
+    }
   }
 
   async onShutdown() {
@@ -162,6 +192,17 @@ class ZoteroSiYuanAddon {
 
   /* -------------------------------------------------------------------- UI */
 
+  /** The localized labels, resolved once. */
+  _label(name, fallback) {
+    if (!this._labels) {
+      this._labels = {};
+    }
+    if (this._labels[name] === undefined) {
+      this._labels[name] = getString(name, fallback);
+    }
+    return this._labels[name];
+  }
+
   _onRenderSidebarAnnotationHeader(event) {
     const doc = event && event.doc;
     const params = event && event.params;
@@ -170,12 +211,20 @@ class ZoteroSiYuanAddon {
       return;
     }
 
+    // One delegated listener per reader document, instead of one per link —
+    // a PDF with hundreds of annotations would otherwise pile up hundreds
+    // of listeners.
+    this._ensureDelegation(doc);
+
     const button = doc.createElement("button");
     button.className = "zotero-siyuan-annotation-button";
     button.type = "button";
     button.style.cssText = BUTTON_STYLE;
+    // The key is what the index is keyed by, so the marker can be added
+    // later even if the index was not ready when the header was rendered.
+    button.setAttribute("data-zsi-annotation", annotation.id || "");
 
-    const label = getString("zoteroSiYuan-button-label", "Send to SiYuan");
+    const label = this._label("zoteroSiYuan-button-label", "Send to SiYuan");
     button.setAttribute("aria-label", label);
     button.title = label;
     button.innerHTML = ICON_SVG;
@@ -189,35 +238,200 @@ class ZoteroSiYuanAddon {
     // append() must be called synchronously, before this handler returns.
     event.append(button);
 
-    // Already sent? Offer a way back to the SiYuan block. The reader hands
-    // the tags over with the annotation, so this needs no lookup.
-    const sentBlockID = blockIDFromTags(annotation.tags);
+    // Already sent? Offer a way back to the SiYuan block. The mapping comes
+    // from the workspace, so it works on every machine and leaves no trace
+    // in the Zotero library.
+    const sentBlockID = this._index.get(annotation.id);
     if (sentBlockID) {
-      const link = doc.createElement("a");
-      link.className = "zotero-siyuan-sent-link";
-      link.href = siyuanBlockLink(sentBlockID);
-      link.style.cssText = SENT_LINK_STYLE;
-      const label = getString(
-        "zoteroSiYuan-sent-title",
-        "Already sent to SiYuan — click to open that block",
-      );
-      link.title = label;
-      link.setAttribute("aria-label", label);
-      link.textContent = "↗";
-      link.addEventListener("click", (e) => {
-        e.preventDefault();
-        e.stopPropagation();
-        this._openInSiYuan(sentBlockID);
-      });
-      event.append(link);
+      // The reader renders the sidebar with React, which only knows about
+      // the nodes it created itself. A marker that was put in by hand — the
+      // one that appears right after a send — is invisible to it, so React
+      // would leave it standing next to its own and the reader would show
+      // two. Drop the hand-made one before React renders its own.
+      this._dropManualLinks(doc, annotation.id);
+      event.append(this._createSentLink(doc, sentBlockID, annotation.id));
+    }
+
+    // Make sure this PDF's blocks are in the index. The sidebar is
+    // rendered synchronously, so this happens in the background — and the
+    // markers are added the moment the answer arrives.
+    this._ensureAttachmentIndexed(event.reader, doc);
+  }
+
+  /**
+   * Remove the markers that were inserted by hand for one annotation.
+   *
+   * @param {Object} doc - the reader document
+   * @param {String} annotationKey
+   */
+  _dropManualLinks(doc, annotationKey) {
+    if (!doc || !doc.querySelectorAll) {
+      return;
+    }
+    for (const node of doc.querySelectorAll("[data-zsi-for]")) {
+      if (node.getAttribute("data-zsi-for") === annotationKey) {
+        node.remove();
+      }
     }
   }
 
-  /** Open a SiYuan block in the desktop app. */
-  _openInSiYuan(blockID) {
+  /**
+   * The "already sent" marker: the SiYuan logo, linking to the block.
+   * @param {Object} doc - the reader document
+   * @param {String} blockID - the SiYuan block
+   * @param {String} annotationKey - the annotation it belongs to
+   * @returns {Object} the element
+   */
+  _createSentLink(doc, blockID, annotationKey = "") {
+    const link = doc.createElement("a");
+    link.className = "zotero-siyuan-sent-link";
+    link.href = siyuanBlockLink(blockID);
+    link.setAttribute("data-block-id", blockID);
+    if (annotationKey) {
+      link.setAttribute("data-zsi-for", annotationKey);
+    }
+    link.style.cssText = SENT_LINK_STYLE;
+    const label = this._label(
+      "zoteroSiYuan-sent-title",
+      "Already sent to SiYuan — click to open that block",
+    );
+    link.title = label;
+    link.setAttribute("aria-label", label);
+
+    const icon = createSiyuanIcon(doc, 14);
+    icon.style.cssText = SENT_ICON_STYLE;
+    link.appendChild(icon);
+
+    return link;
+  }
+
+
+  /**
+   * Handle the clicks on the markers with a single listener per document.
+   * @param {Object} doc - the reader document
+   */
+  _ensureDelegation(doc) {
+    if (!doc || this._delegatedDocs.has(doc)) {
+      return;
+    }
+    this._delegatedDocs.add(doc);
+    doc.addEventListener("click", (e) => {
+      const target = e.target;
+      const link =
+        target && target.closest
+          ? target.closest(".zotero-siyuan-sent-link")
+          : null;
+      if (!link) {
+        return;
+      }
+      e.preventDefault();
+      e.stopPropagation();
+      this._openInSiYuan(link.getAttribute("data-block-id"));
+    });
+  }
+
+  /**
+   * Add the marker to every annotation of a reader document that has been
+   * sent but does not show it yet.
+   *
+   * This is what makes the marker appear right after a send, and what adds
+   * it to an already open sidebar once the index arrives.
+   *
+   * @param {Object} doc - the reader document
+   */
+  _updateRenderedMarkers(doc) {
+    if (!doc || !doc.querySelectorAll) {
+      return 0;
+    }
+    let added = 0;
+    const buttons = doc.querySelectorAll("[data-zsi-annotation]");
+    for (const button of buttons) {
+      const key = button.getAttribute("data-zsi-annotation");
+      if (!key) {
+        continue;
+      }
+      const blockID = this._index.get(key);
+      if (!blockID) {
+        continue;
+      }
+      const parent = button.parentNode;
+      if (!parent) {
+        continue;
+      }
+      // One marker per annotation, whether it was rendered by React or put in
+      // by hand.
+      let present = false;
+      for (const link of parent.querySelectorAll(".zotero-siyuan-sent-link")) {
+        if (link.getAttribute("data-zsi-for") === key) {
+          present = true;
+          break;
+        }
+      }
+      if (present) {
+        continue;
+      }
+      parent.insertBefore(
+        this._createSentLink(doc, blockID, key),
+        button.nextSibling,
+      );
+      added++;
+    }
+    return added;
+  }
+
+  /**
+   * Load the blocks of a PDF into the index, in the background.
+   * @param {Object} reader - the reader tab
+   * @param {Object} doc - the reader document
+   */
+  _ensureAttachmentIndexed(reader, doc) {
+    const itemID = reader && reader.itemID;
+    if (!itemID || this._indexedAttachments.has(itemID)) {
+      return;
+    }
+    this._indexedAttachments.add(itemID);
+    (async () => {
+      try {
+        const attachment = await Zotero.Items.getAsync(itemID);
+        const key = attachment && attachment.key;
+        if (!key) {
+          return;
+        }
+        const found = await this._index.refreshForAttachment(this.getCLI(), key);
+        Zotero.debug(
+          `ZoteroSiYuan: indexed ${found} sent block(s) of attachment ${key}`,
+        );
+        this._updateRenderedMarkers(doc);
+      }
+      catch (e) {
+        // Let it be tried again next time the PDF is opened.
+        this._indexedAttachments.delete(itemID);
+        Zotero.debug(
+          `ZoteroSiYuan: could not index the attachment: ${e.message}`,
+        );
+      }
+    })();
+  }
+
+  /**
+   * Open a SiYuan block in the desktop app.
+   *
+   * The desktop app is started directly when possible, so no confirmation
+   * dialog gets in the way; otherwise the URL goes through the system's
+   * protocol handler.
+   */
+  async _openInSiYuan(blockID) {
     const url = siyuanBlockLink(blockID);
     if (!url) {
       return;
+    }
+    try {
+      if (await launchExternally(url)) {
+        return;
+      }
+    }
+    catch (e) {
+      Zotero.debug(`ZoteroSiYuan: could not start SiYuan directly: ${e}`);
     }
     try {
       Zotero.launchURL(url);
@@ -266,9 +480,12 @@ class ZoteroSiYuanAddon {
       this._flash(button, getString("zoteroSiYuan-done", "Sent to SiYuan"), false);
       Zotero.debug(
         `ZoteroSiYuan: appended an annotation to the SiYuan daily note in notebook ${result.notebook.name} (${result.notebook.id}) via ${result.transport}` +
-          (result.blockID ? `, block ${result.blockID}` : "") +
-          (result.tagged ? ", the annotation is tagged" : ""),
+          (result.blockID ? `, block ${result.blockID}` : ""),
       );
+      // The marker shows up right away — no need to reopen the PDF.
+      if (result.blockID && button) {
+        this._updateRenderedMarkers(button.ownerDocument);
+      }
       this._notify(result);
     }
     catch (e) {
@@ -300,8 +517,12 @@ class ZoteroSiYuanAddon {
     // change there cannot silently lose the block id.
     const transport = typeof sent === "string" ? sent : sent.transport;
     const blockID = typeof sent === "string" ? "" : sent.blockID || "";
-    const tagged = await this._markSent(annotation, blockID);
-    return { transport, blockID, tagged, notebook, markdown };
+    // Remember it right away — no need to wait for the next scan.
+    const annotationKey = await this._resolveAnnotationKey(annotation);
+    if (annotationKey && blockID) {
+      this._index.add(annotationKey, blockID);
+    }
+    return { transport, blockID, notebook, markdown };
   }
 
   /** The bubble that confirms the write and offers a way back to SiYuan. */
@@ -613,24 +834,22 @@ class ZoteroSiYuanAddon {
   }
 
   /**
-   * Record on the annotation which SiYuan block it went to, so the reader
-   * can offer a link back.
+   * Rebuild the index of already-sent annotations from the workspace.
+   *
+   * @returns {Promise<Number>} how many annotations are known
    */
-  async _markSent(annotation, blockID) {
-    if (!blockID) {
-      return false;
-    }
+  async refreshIndex() {
     try {
-      const item = await this._getAnnotationItem(annotation);
-      if (!item) {
-        return false;
-      }
-      await markSent(item, blockID);
-      return true;
+      const count = await this._index.refresh(this.getCLI());
+      Zotero.debug(
+        `ZoteroSiYuan: the index knows ${count} sent annotation(s) ` +
+          `(${this._index.blocksScanned} block(s) scanned)`,
+      );
+      return count;
     }
     catch (e) {
-      Zotero.debug(`ZoteroSiYuan: could not tag the annotation: ${e}`);
-      return false;
+      Zotero.debug(`ZoteroSiYuan: could not build the index: ${e.message}`);
+      return 0;
     }
   }
 

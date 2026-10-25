@@ -458,6 +458,128 @@ section("Template editing");
   );
 }
 
+/* --------------------- 9. the index of sent annotations ------------------ */
+
+section("Sent-annotation index");
+{
+  const {
+    SiYuanIndex,
+    parseAnnotationKey,
+    annotationDeepLink,
+    ZOTERO_LINK_PREFIX,
+  } = await import(
+    new URL("../src/modules/siyuan-index.js", import.meta.url).href
+  );
+
+  check(
+    "the annotation key is read out of a deep link",
+    parseAnnotationKey(
+      "作者：X  来源：[论文](zotero://open/library/items/ATTACH01?annotation=ABCD1234&page=3)",
+    ) === "ABCD1234",
+    parseAnnotationKey(
+      "来源：[论文](zotero://open/library/items/ATTACH01?annotation=ABCD1234&page=3)",
+    ),
+  );
+  check(
+    "a block without a deep link has no annotation key",
+    parseAnnotationKey("作者：X  年份：2025") === "",
+  );
+  check(
+    "a deep link without an annotation has no annotation key",
+    parseAnnotationKey(`[x](${ZOTERO_LINK_PREFIX}ATTACH01)`) === "",
+  );
+  check(
+    "the deep link points at the annotation",
+    annotationDeepLink("ATTACH01", "ABCD1234", 3) ===
+      "zotero://open/library/items/ATTACH01?annotation=ABCD1234&page=3",
+    annotationDeepLink("ATTACH01", "ABCD1234", 3),
+  );
+  check(
+    "a deep link without a page has no page",
+    !/page=/.test(annotationDeepLink("ATTACH01", "ABCD1234", 0)),
+  );
+
+  const index = new SiYuanIndex();
+  index.add("ABCD1234", "20260101000000-abcdefg");
+  check("the index finds a block by annotation key", index.get("ABCD1234") === "20260101000000-abcdefg");
+  check("the index knows nothing about an unknown annotation", index.get("NOPE") === "");
+  check("the index ignores an empty key", index.get("") === "");
+}
+
+/* --------------------- 10. opening SiYuan without a prompt -------------- */
+
+section("SiYuan launcher");
+{
+  const { parseHandlerExecutable } = await import(
+    new URL("../src/modules/siyuan-launcher.js", import.meta.url).href
+  );
+
+  check(
+    "a quoted handler yields the executable",
+    parseHandlerExecutable(
+      '"C:\\Program Files\\SiYuan\\SiYuan.exe" "%1"',
+    ) === "C:\\Program Files\\SiYuan\\SiYuan.exe",
+    parseHandlerExecutable('"C:\\Program Files\\SiYuan\\SiYuan.exe" "%1"'),
+  );
+  check(
+    "an unquoted handler yields the executable",
+    parseHandlerExecutable("C:\\SiYuan\\SiYuan.exe %1") ===
+      "C:\\SiYuan\\SiYuan.exe",
+    parseHandlerExecutable("C:\\SiYuan\\SiYuan.exe %1"),
+  );
+  check(
+    "a single executable is handled",
+    parseHandlerExecutable("C:\\SiYuan\\SiYuan.exe") ===
+      "C:\\SiYuan\\SiYuan.exe",
+  );
+  check(
+    "an empty handler yields nothing",
+    parseHandlerExecutable("") === "" && parseHandlerExecutable(null) === "",
+  );
+}
+
+/* --------------------- 11. the chrome package and its icon --------------- */
+
+section("Chrome package");
+{
+  const {
+    SIYUAN_ICON_SHAPES,
+    SIYUAN_ICON_VIEWBOX,
+    SVG_NS,
+  } = await import(new URL("../src/modules/icons.js", import.meta.url).href);
+
+  check(
+    "the logo is inline SVG",
+    SVG_NS === "http://www.w3.org/2000/svg" &&
+      SIYUAN_ICON_SHAPES.length === 4,
+    `${SIYUAN_ICON_SHAPES.length} shapes`,
+  );
+  check(
+    "every shape of the logo has points and a colour",
+    SIYUAN_ICON_SHAPES.every(
+      (s) => typeof s.points === "string" && /^#[0-9A-F]{6}$/i.test(s.fill),
+    ),
+  );
+  check(
+    "the logo uses SiYuan's own colours",
+    SIYUAN_ICON_SHAPES.some((s) => s.fill.toLowerCase() === "#da3939") &&
+      SIYUAN_ICON_SHAPES.some((s) => s.fill.toLowerCase() === "#3b3e43"),
+  );
+  check(
+    "the logo has a viewBox",
+    /^-?[\d.]+ -?[\d.]+ [\d.]+ [\d.]+$/.test(SIYUAN_ICON_VIEWBOX),
+    SIYUAN_ICON_VIEWBOX,
+  );
+  check(
+    "the logo is not referenced by URL",
+    // A chrome:// URL for a plugin-registered package is unreadable in the
+    // reader's content process, so the logo has to be inline.
+    !readFileSync(join(ROOT, "src", "index.js"), "utf8").includes(
+      "chrome://${CHROME_PACKAGE}",
+    ),
+  );
+}
+
 /* --------------------------- 4. packaged XPI ---------------------------- */
 
 section("Packaged XPI");

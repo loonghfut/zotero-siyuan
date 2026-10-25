@@ -9,6 +9,9 @@ pref-selftest = 运行端到端自检
 pref-selftesting = 正在运行自检…
 pref-selftest-ok = 自检通过。报告位于：
 pref-selftest-failed = 自检失败：
+pref-rescan = 重新扫描已发送的注释
+pref-rescanning = 正在扫描思源…
+pref-rescanned = 找到已发送的注释：
 pref-hint = 命令行路径留空会自动查找；工作空间留空则使用 siyuan 命令行当前的工作空间；笔记本留空则使用第一个笔记本。
 
 pref-template-title = 发送模板

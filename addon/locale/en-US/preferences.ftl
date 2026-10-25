@@ -9,6 +9,9 @@ pref-selftest = Run the end-to-end self test
 pref-selftesting = Running the self test…
 pref-selftest-ok = Self test passed. The report is in:
 pref-selftest-failed = Self test failed:
+pref-rescan = Re-scan the sent annotations
+pref-rescanning = Scanning SiYuan…
+pref-rescanned = Sent annotations found:
 pref-hint = Leave the CLI path empty to find it automatically. Leave the workspace empty to use the one the siyuan CLI currently uses, and the notebook empty to use the first one.
 
 pref-template-title = Send template

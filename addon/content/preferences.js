@@ -21,6 +21,7 @@ var ZoteroSiYuanPreferences = {
   BUTTON_ID: "zotero-prefpane-zoteroSiYuan-test",
   SELFTEST_BUTTON_ID: "zotero-prefpane-zoteroSiYuan-selftest",
   RESET_BUTTON_ID: "zotero-prefpane-zoteroSiYuan-reset-template",
+  RESCAN_BUTTON_ID: "zotero-prefpane-zoteroSiYuan-rescan",
   TEMPLATE_ID: "zotero-prefpane-zoteroSiYuan-template",
   PREVIEW_ID: "zotero-prefpane-zoteroSiYuan-preview",
   VARIABLES_ID: "zotero-prefpane-zoteroSiYuan-variables",
@@ -67,6 +68,10 @@ var ZoteroSiYuanPreferences = {
         e.preventDefault();
         this.resetTemplate();
       }
+      else if (target.id === this.RESCAN_BUTTON_ID) {
+        e.preventDefault();
+        this.rescan();
+      }
     });
 
     document.addEventListener("input", (e) => {
@@ -99,6 +104,33 @@ var ZoteroSiYuanPreferences = {
     });
 
     this._waitForPane();
+  },
+
+  /**
+   * Rebuild the list of the annotations that have been sent.
+   *
+   * The mapping lives in the SiYuan workspace, so it is read back from
+   * there — nothing is stored in the Zotero library.
+   */
+  rescan: async function () {
+    this._setResult(
+      this._text("zoteroSiYuan-pref-rescanning", "Scanning SiYuan…"),
+      false,
+    );
+    try {
+      if (!Zotero.ZoteroSiYuan || !Zotero.ZoteroSiYuan.refreshIndex) {
+        throw new Error("The plugin is not running. Restart Zotero and try again.");
+      }
+      var count = await Zotero.ZoteroSiYuan.refreshIndex();
+      this._setResult(
+        this._text("zoteroSiYuan-pref-rescanned", "Sent annotations found: ") +
+          count,
+        false,
+      );
+    }
+    catch (e) {
+      this._setResult(e.message, true);
+    }
   },
 
   /**

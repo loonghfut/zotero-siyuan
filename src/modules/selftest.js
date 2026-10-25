@@ -21,7 +21,12 @@
  */
 
 import { tempFilePath } from "../utils/paths.js";
-import { clearSent } from "./sent.js";
+import { clearLegacyTags } from "./siyuan-index.js";
+import {
+	findHandlerExecutable,
+	protocolHandlerCommand,
+	suppressProtocolWarning,
+} from "./siyuan-launcher.js";
 import { showToast, toastTarget } from "./toast.js";
 
 const REPORT_FILE = "zotero-siyuan-selftest.json";
@@ -362,6 +367,9 @@ export async function runSelfTest({
 		const started = Date.now();
 		try {
 			entry.value = await fn();
+			// The same content under `detail`, so the report reads the same
+			// way whichever helper recorded the step.
+			entry.detail = entry.value;
 		}
 		catch (e) {
 			entry.ok = false;
@@ -494,6 +502,16 @@ export async function runSelfTest({
 			return { rows: Array.isArray(rows) ? rows.length : 0 };
 		});
 
+		/* --- 1d. the index of already-sent annotations ------------------ */
+		await step("the index of sent annotations is built", async () => {
+			const count = await addon.refreshIndex();
+			return {
+				indexed: count,
+				scanned: addon._index.blocksScanned,
+				scannedAt: addon._index.scannedAt,
+			};
+		});
+
 		/* --- 2. a real annotation, and a real parent item ---------------- */
 		// A real write needs a real annotation: only a real one can be
 		// tagged, and only a real one proves the tag lands on the right item.
@@ -561,13 +579,17 @@ export async function runSelfTest({
 			const sentDoc = win.document.implementation.createHTMLDocument(
 				"zotero-siyuan-selftest-sent",
 			);
+			// Put a known annotation into the index, the way a real send
+			// would, and see whether the reader offers a way back.
+			addon._index.add("SELFTESTSENT", "20260101000000-abcdefg");
 			addon._onRenderSidebarAnnotationHeader({
 				doc: sentDoc,
 				params: {
 					type: "SidebarAnnotationHeader",
 					annotation: {
 						...annotation,
-						tags: [{ name: "siyuan:20260101000000-abcdefg" }],
+						id: "SELFTESTSENT",
+						tags: [],
 					},
 				},
 				reader: { itemID: attachmentID },
@@ -576,10 +598,129 @@ export async function runSelfTest({
 				},
 			});
 			const link = sentDoc.body.querySelector(".zotero-siyuan-sent-link");
+			addon._index.blocks.delete("SELFTESTSENT");
 			return {
 				rendered: !!link,
 				href: link ? link.getAttribute("href") : "",
 				title: link ? link.getAttribute("aria-label") : "",
+				hasIcon: !!(link && link.querySelector("img")),
+			};
+		});
+
+		/* --- 3c. the marker shows up as soon as a send succeeds --------- */
+		await step("the marker appears without reopening the PDF", () => {
+			const doc = win.document.implementation.createHTMLDocument(
+				"zotero-siyuan-selftest-instant",
+			);
+			const button = doc.createElement("button");
+			button.setAttribute("data-zsi-annotation", "SELFKEY1");
+			doc.body.appendChild(button);
+			addon._index.add("SELFKEY1", "20260101000000-abcdefg");
+			const added = addon._updateRenderedMarkers(doc);
+			const link = doc.body.querySelector(".zotero-siyuan-sent-link");
+			const again = addon._updateRenderedMarkers(doc);
+			addon._index.blocks.delete("SELFKEY1");
+			return {
+				added,
+				again,
+				rendered: !!link,
+				href: link ? link.getAttribute("href") : "",
+			};
+		});
+
+		/* --- 3d. the marker never appears twice -------------------------- */
+		await step("the marker never appears twice", () => {
+			const doc = win.document.implementation.createHTMLDocument(
+				"zotero-siyuan-selftest-double",
+			);
+			const key = "SELFKEY2";
+			addon._index.add(key, "20260101000000-abcdefg");
+
+			// The reader renders the sidebar with React, which only knows
+			// about the nodes it created. A marker put in by hand — the one
+			// that appears right after a send — must not survive next to
+			// the one React renders.
+			const render = () => {
+				addon._onRenderSidebarAnnotationHeader({
+					doc,
+					params: {
+						type: "SidebarAnnotationHeader",
+						annotation: { ...annotation, id: key, tags: [] },
+					},
+					reader: { itemID: attachmentID },
+					append(node) {
+						doc.body.appendChild(node);
+					},
+				});
+			};
+
+			render();
+			const afterFirst = doc.body.querySelectorAll(
+				".zotero-siyuan-sent-link",
+			).length;
+
+			// The hand-made marker, as it appears right after a send.
+			addon._updateRenderedMarkers(doc);
+			const afterManual = doc.body.querySelectorAll(
+				".zotero-siyuan-sent-link",
+			).length;
+
+			// React re-renders the header.
+			render();
+			const afterRerender = doc.body.querySelectorAll(
+				".zotero-siyuan-sent-link",
+			).length;
+
+			addon._index.blocks.delete(key);
+			return { afterFirst, afterManual, afterRerender };
+		});
+
+		/* --- 3d. one delegated listener per document ------------------- */
+		await step("the marker opens the block when clicked", () => {
+			const doc = win.document.implementation.createHTMLDocument(
+				"zotero-siyuan-selftest-click",
+			);
+			addon._ensureDelegation(doc);
+			const link = addon._createSentLink(doc, "20260101000000-abcdefg");
+			doc.body.appendChild(link);
+
+			let opened = "";
+			const original = addon._openInSiYuan.bind(addon);
+			addon._openInSiYuan = (id) => {
+				opened = id;
+			};
+			const event = doc.createEvent("MouseEvents");
+			event.initEvent("click", true, true);
+			link.dispatchEvent(event);
+			addon._openInSiYuan = original;
+			return { opened };
+		});
+
+		/* --- 3f. the SiYuan app can be started without a prompt -------- */
+		await step("the SiYuan app can be opened without a prompt", async () => {
+			const executable = await findHandlerExecutable();
+			return {
+				fromRegistry: protocolHandlerCommand(),
+				executable,
+				found: !!executable,
+				warningSuppressed: suppressProtocolWarning(),
+			};
+		});
+
+		/* --- 3e. the SiYuan logo really renders -------------------------- */
+		await step("the SiYuan icon is inline SVG", () => {
+			const doc = win.document.implementation.createHTMLDocument(
+				"zotero-siyuan-selftest-icon",
+			);
+			const link = addon._createSentLink(doc, "20260101000000-abcdefg");
+			const svg = link.querySelector("svg");
+			const polygons = svg ? svg.querySelectorAll("polygon") : [];
+			return {
+				rendered: !!svg,
+				namespace: svg ? svg.namespaceURI : "",
+				shapes: polygons.length,
+				viewBox: svg ? svg.getAttribute("viewBox") : "",
+				fills: [...polygons].map((p) => p.getAttribute("fill")),
 			};
 		});
 
@@ -714,21 +855,20 @@ export async function runSelfTest({
 			captured.transport,
 		);
 
-		/* --- 6. a real write also has to tag the annotation -------------- */
+		/* --- 6. a real write also has to be findable again --------------- */
 		if (realWrite) {
-			await step("the annotation is tagged with the SiYuan block", async () => {
+			await step("the new block is indexed", async () => {
 				if (!captured.blockID) {
 					throw new Error("the new SiYuan block could not be found");
 				}
-				const item = await Zotero.Items.getAsync(real.item.id);
-				const tags = (item.getTags() || []).map((t) => t.tag);
-				const expected = `siyuan:${captured.blockID}`;
-				if (!tags.includes(expected)) {
+				const key = await addon._resolveAnnotationKey(annotation);
+				const known = addon._index.get(key);
+				if (known !== captured.blockID) {
 					throw new Error(
-						`the annotation has ${JSON.stringify(tags)}, expected ${expected}`,
+						`the index knows ${known || "nothing"} for ${key}, expected ${captured.blockID}`,
 					);
 				}
-				return { tag: expected, tags };
+				return { key, blockID: known };
 			});
 
 			// A self test that leaves its traces behind is not a self test.
@@ -738,7 +878,7 @@ export async function runSelfTest({
 					await cli.deleteBlock(block);
 				}
 				if (real && real.item) {
-					await clearSent(real.item);
+					await clearLegacyTags(real.item);
 				}
 				return { removedBlocks: blocks };
 			});
