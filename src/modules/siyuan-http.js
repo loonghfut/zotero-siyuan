@@ -1,0 +1,274 @@
+/**
+ * SiYuan kernel HTTP API — the fallback transport.
+ *
+ * The CLI is the primary transport, but a plugin must not depend on being
+ * able to spawn a process. This client talks to the local SiYuan kernel
+ * directly, which is also how the CLI itself works.
+ *
+ * Endpoints used:
+ *
+ *   POST /api/notebook/lsNotebooks
+ *   POST /api/block/appendDailyNoteBlock
+ *
+ * The API token lives in the workspace's own configuration file
+ * (`<workspace>/conf/conf.json` → `api.token`), so it is read at runtime
+ * rather than configured by hand.
+ */
+
+import { homeDir, localAppDataDir, roamingAppDataDir } from "../utils/paths.js";
+import { responseText } from "../utils/http.js";
+
+const WORKSPACE_LIST_FILES = [
+  "workspace.json",
+];
+
+/**
+ * How many workspaces may be tried with their own token.
+ *
+ * Every wrong token is a failed authentication as far as the kernel is
+ * concerned, and it rate-limits those — so a handful is the limit, not a
+ * sweep through every workspace the user ever opened.
+ */
+const MAX_AUTH_ATTEMPTS = 3;
+
+export class SiYuanHTTP {
+  constructor(options) {
+    this.host = options.host || "127.0.0.1";
+    this.port = options.port || 6806;
+    this.token = options.token || "";
+    this.workspaceDir = options.workspaceDir || "";
+  }
+
+  get baseURL() {
+    return `http://${this.host}:${this.port}`;
+  }
+
+  async request(endpoint, payload) {
+    if (!this.token) {
+      throw new Error("No SiYuan API token found.");
+    }
+    const response = await Zotero.HTTP.request("POST", this.baseURL + endpoint, {
+      body: JSON.stringify(payload || {}),
+      headers: {
+        Authorization: `Token ${this.token}`,
+        "Content-Type": "application/json",
+      },
+      timeout: 8000,
+    });
+    // Zotero.HTTP.request resolves with the XMLHttpRequest itself, so the
+    // body is `responseText` — there is no `response.text()`.
+    const text = await responseText(response);
+    let result;
+    try {
+      result = JSON.parse(text);
+    }
+    catch (e) {
+      throw new Error(
+        `SiYuan returned a non-JSON response from ${endpoint}: ${text.slice(0, 200)}`,
+      );
+    }
+    if (result.code !== 0) {
+      const reason = result.data && result.data.reason ? ` (${result.data.reason})` : "";
+      throw new Error(`SiYuan ${endpoint} failed${reason}: ${result.msg}`);
+    }
+    return result.data;
+  }
+
+  async listNotebooks() {
+    const data = await this.request("/api/notebook/lsNotebooks", {});
+    return (data && data.notebooks) || [];
+  }
+
+  /** Append a Markdown block to today's daily note, creating it if needed. */
+  async appendDailyNote(notebookID, markdown) {
+    return await this.request("/api/block/appendDailyNoteBlock", {
+      notebook: notebookID,
+      dataType: "markdown",
+      data: markdown,
+    });
+  }
+
+  /**
+   * Resolve the notebook that should receive the daily note.
+   * @param {string} wanted - notebook name or id; empty = first usable one
+   */
+  async resolveNotebook(wanted) {
+    const notebooks = await this.listNotebooks();
+    if (!notebooks.length) {
+      throw new Error("The selected SiYuan workspace has no notebooks.");
+    }
+    if (wanted) {
+      const lower = String(wanted).trim().toLowerCase();
+      for (const notebook of notebooks) {
+        if (
+          notebook.id === wanted ||
+          String(notebook.name).trim().toLowerCase() === lower
+        ) {
+          return notebook;
+        }
+      }
+      throw new Error(
+        `No SiYuan notebook named "${wanted}". Available: ` +
+          notebooks.map((n) => n.name).join(", "),
+      );
+    }
+    for (const notebook of notebooks) {
+      if (!notebook.closed) {
+        return notebook;
+      }
+    }
+    return notebooks[0];
+  }
+
+  /**
+   * Find a workspace whose API token actually works.
+   *
+   * The configured workspace is tried first — it is the one the user chose.
+   * Trying a *wrong* token against a running kernel counts as a failed
+   * authentication, and SiYuan's kernel rate-limits those ("too many
+   * authentication failures"), which would lock out the workspace that does
+   * work. So the number of attempts is capped.
+   *
+   * @param {string} workspacePref - the configured workspace directory
+   * @returns {Promise<SiYuanHTTP>}
+   */
+  static async discover(workspacePref) {
+    const candidates = [];
+
+    if (workspacePref) {
+      candidates.push(workspacePref);
+    }
+    for (const dir of await SiYuanHTTP.workspaceList()) {
+      if (!candidates.includes(dir)) {
+        candidates.push(dir);
+      }
+    }
+    for (const dir of SiYuanHTTP.defaultWorkspaceDirs()) {
+      if (!candidates.includes(dir)) {
+        candidates.push(dir);
+      }
+    }
+
+    const errors = [];
+    let attempts = 0;
+    for (const dir of candidates) {
+      let conf;
+      try {
+        conf = await SiYuanHTTP.readWorkspaceConf(dir);
+      }
+      catch (e) {
+        // no configuration there — not a candidate
+        continue;
+      }
+      if (!conf || !conf.api || !conf.api.token) {
+        continue;
+      }
+
+      if (++attempts > MAX_AUTH_ATTEMPTS) {
+        errors.push(
+          `stopped after ${MAX_AUTH_ATTEMPTS} authentication attempts ` +
+            "(the kernel limits the failed ones)",
+        );
+        break;
+      }
+
+      const client = new SiYuanHTTP({
+        host: "127.0.0.1",
+        port: conf.api.port || 6806,
+        token: conf.api.token,
+        workspaceDir: dir,
+      });
+      try {
+        // Verify the token really belongs to a running kernel.
+        await client.listNotebooks();
+        return client;
+      }
+      catch (e) {
+        errors.push(`${dir}: ${SiYuanHTTP.explain(e)}`);
+      }
+    }
+
+    throw new Error(
+      "Could not reach a SiYuan kernel over HTTP. " +
+        (errors.length ? "Tried:\n  " + errors.join("\n  ") : "No workspace with an API token was found."),
+    );
+  }
+
+  /**
+   * Make a failure readable.
+   *
+   * The kernel answers "too many authentication failures" with a 429 whose
+   * body is in Chinese — worth translating, because it looks like the plugin
+   * simply cannot connect.
+   */
+  static explain(error) {
+    const text = error && error.message ? error.message : String(error);
+    if (/\b429\b/.test(text)) {
+      return (
+        "the kernel is rate-limiting authentication attempts (too many failed " +
+        "ones) — wait a moment and try again" +
+        (text.includes(":") ? ` [${text.split(":").pop().trim()}]` : "")
+      );
+    }
+    return text;
+  }
+
+  static async readWorkspaceConf(dir) {    const path = PathUtils.join(dir, "conf", "conf.json");
+    const text = await Zotero.File.getContentsAsync(path);
+    return JSON.parse(text);
+  }
+
+  /** The workspaces SiYuan's app knows about (its "recent workspaces" list). */
+  static async workspaceList() {
+    const dirs = [];
+    for (const appDir of SiYuanHTTP.appConfigDirs()) {
+      for (const name of WORKSPACE_LIST_FILES) {
+        try {
+          const path = PathUtils.join(appDir, name);
+          const text = await Zotero.File.getContentsAsync(path);
+          const list = JSON.parse(text);
+          for (const entry of list) {
+            const dir = typeof entry === "string" ? entry : entry.path;
+            if (dir) {
+              dirs.push(dir);
+            }
+          }
+        }
+        catch (e) {
+          // not there, or not readable — try the next location
+        }
+      }
+    }
+    return dirs;
+  }
+
+  static appConfigDirs() {
+    const dirs = [];
+    const home = homeDir();
+    if (home) {
+      dirs.push(PathUtils.join(home, ".config", "siyuan"));
+      dirs.push(PathUtils.join(home, "Library", "Application Support", "siyuan"));
+      dirs.push(PathUtils.join(home, "AppData", "Roaming", "siyuan"));
+    }
+    const roaming = roamingAppDataDir();
+    if (roaming) {
+      dirs.push(PathUtils.join(roaming, "siyuan"));
+    }
+    const local = localAppDataDir();
+    if (local) {
+      dirs.push(PathUtils.join(local, "siyuan"));
+    }
+    return dirs;
+  }
+
+  static defaultWorkspaceDirs() {
+    const dirs = [];
+    const home = homeDir();
+    if (home) {
+      dirs.push(PathUtils.join(home, "SiYuan"));
+      dirs.push(PathUtils.join(home, "Desktop", "siyuanceshi"));
+      dirs.push(PathUtils.join(home, "Documents", "SiYuan"));
+    }
+    return dirs;
+  }
+}

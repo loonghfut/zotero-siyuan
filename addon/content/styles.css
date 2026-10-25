@@ -1,0 +1,122 @@
+/* Zotero → SiYuan — styles for the preferences pane. */
+
+.zotero-siyuan-hint {
+  margin: 8px 0 4px 0;
+  font-size: 0.9em;
+  opacity: 0.75;
+}
+
+.zotero-siyuan-result {
+  font-size: 0.9em;
+}
+
+.zotero-siyuan-status {
+  font-size: 0.9em;
+  opacity: 0.8;
+}
+
+.zotero-siyuan-template-head {
+  align-items: center;
+  margin-bottom: 4px;
+}
+
+.zotero-siyuan-template-head > label {
+  margin-inline-end: 8px;
+}
+
+.zotero-siyuan-template-head > button {
+  margin-inline-end: 8px;
+}
+
+.zotero-siyuan-template-head > label,
+.zotero-siyuan-template-head > button {
+  margin-block: 0;
+}
+
+/* The template editor. */
+#zotero-prefpane-zoteroSiYuan-template {
+  width: 100%;
+  min-height: 12em;
+  font-family: monospace;
+  font-size: 0.95em;
+  line-height: 1.45;
+  padding: 6px;
+  box-sizing: border-box;
+  resize: vertical;
+  white-space: pre;
+  overflow-wrap: normal;
+  overflow-x: auto;
+}
+
+/* What the template renders to. */
+.zotero-siyuan-preview {
+  width: 100%;
+  max-height: 14em;
+  overflow: auto;
+  margin: 4px 0 0 0;
+  padding: 8px;
+  box-sizing: border-box;
+  font-family: monospace;
+  font-size: 0.9em;
+  line-height: 1.4;
+  white-space: pre-wrap;
+  background: rgba(127, 127, 127, 0.08);
+  border: 1px solid rgba(127, 127, 127, 0.25);
+  border-radius: 4px;
+}
+
+/* The cheat sheet. */
+.zotero-siyuan-variables {
+  max-height: 16em;
+  overflow: auto;
+  border: 1px solid rgba(127, 127, 127, 0.25);
+  border-radius: 4px;
+  padding: 4px 8px;
+  box-sizing: border-box;
+}
+
+.zotero-siyuan-variables table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.zotero-siyuan-variables td {
+  padding: 2px 6px 2px 0;
+  vertical-align: top;
+  font-size: 0.9em;
+}
+
+.zotero-siyuan-variables .zotero-siyuan-variable-name {
+  font-family: monospace;
+  white-space: nowrap;
+  width: 1%;
+  opacity: 0.9;
+}
+
+/* Clicking a variable inserts it into the template. */
+.zotero-siyuan-variables tr[data-variable] {
+  cursor: pointer;
+}
+
+.zotero-siyuan-variables tr[data-variable]:hover {
+  background: rgba(127, 127, 127, 0.16);
+}
+
+.zotero-siyuan-variables tr[data-variable]:focus {
+  outline: 1px solid var(--accent-blue, #4a90d9);
+  outline-offset: -1px;
+}
+
+/* A variable the current template already uses. */
+.zotero-siyuan-variables .zotero-siyuan-variable-used .zotero-siyuan-variable-name {
+  opacity: 1;
+  font-weight: 600;
+}
+
+.zotero-siyuan-variables .zotero-siyuan-variable-group {
+  padding-top: 8px;
+  font-weight: 600;
+  font-size: 0.85em;
+  opacity: 0.65;
+  border-bottom: 1px solid rgba(127, 127, 127, 0.2);
+}

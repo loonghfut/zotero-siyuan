@@ -1,0 +1,25 @@
+pref-title = SiYuan connection
+pref-cliPath = siyuan CLI path
+pref-workspace = Workspace
+pref-notebook = Notebook
+pref-test = Test connection
+pref-testing = Testing…
+pref-ok = Connected. Notebooks:
+pref-selftest = Run the end-to-end self test
+pref-selftesting = Running the self test…
+pref-selftest-ok = Self test passed. The report is in:
+pref-selftest-failed = Self test failed:
+pref-hint = Leave the CLI path empty to find it automatically. Leave the workspace empty to use the one the siyuan CLI currently uses, and the notebook empty to use the first one.
+
+pref-template-title = Send template
+pref-template = Template
+pref-template-reset = Restore the default
+pref-template-saved = Saved
+pref-template-reset-done = The default template is back
+pref-template-unknown = Unknown variables:
+pref-preview = Preview
+pref-variables = Available variables
+pref-variables-hint = Click a variable to insert it at the cursor; the ones your template already uses are bold.
+pref-insert-hint = Click to insert at the cursor
+pref-inserted = Inserted
+pref-template-hint = The template is Markdown. Use {{variable}} to insert a value and {{#if variable}}…{{/if}} to include a part only when the variable is not empty. The preview uses a real annotation from your library.

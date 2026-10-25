@@ -1,0 +1,25 @@
+pref-title = 思源连接
+pref-cliPath = siyuan 命令行路径
+pref-workspace = 工作空间
+pref-notebook = 笔记本
+pref-test = 测试连接
+pref-testing = 正在测试…
+pref-ok = 连接成功。笔记本：
+pref-selftest = 运行端到端自检
+pref-selftesting = 正在运行自检…
+pref-selftest-ok = 自检通过。报告位于：
+pref-selftest-failed = 自检失败：
+pref-hint = 命令行路径留空会自动查找；工作空间留空则使用 siyuan 命令行当前的工作空间；笔记本留空则使用第一个笔记本。
+
+pref-template-title = 发送模板
+pref-template = 模板
+pref-template-reset = 恢复默认
+pref-template-saved = 已保存
+pref-template-reset-done = 已恢复默认模板
+pref-template-unknown = 模板里有未知变量：
+pref-preview = 预览
+pref-variables = 可用变量
+pref-variables-hint = 点一个变量名就能把它插到模板的光标处；已经用过的变量会加粗。
+pref-insert-hint = 点击插入到光标处
+pref-inserted = 已插入
+pref-template-hint = 模板就是 Markdown。用 {{变量}} 插入内容，用 {{#if 变量}}…{{/if}} 只在变量不为空时保留这一段。预览用的是你库里真实的一条注释。
