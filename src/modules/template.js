@@ -5,10 +5,11 @@
  * rendered with the metadata of the annotation and appended to the SiYuan
  * daily note.
  *
- * Two pieces of syntax:
+ * Three pieces of syntax:
  *
  *   {{name}}            — the value of a variable
  *   {{#if name}}…{{/if}} — the body, only when the variable is not empty
+ *   {{else}}            — the other branch, taken when it is empty
  *
  * The conditional matters because an annotation may have no comment: without
  * it the template would leave an empty `> [!note]` block behind.
@@ -101,6 +102,25 @@ const VARIABLE = /\{\{\s*([A-Za-z][A-Za-z0-9]*)\s*\}\}/g;
 const CONDITIONAL = /\{\{#if\s+([A-Za-z][A-Za-z0-9]*)\s*\}\}/;
 
 /**
+ * The tag that starts the other branch of a conditional.
+ *
+ * It looks like a variable — it is written with braces, just like one —
+ * but it is not: it is a marker, and it must never be looked up among the
+ * variables.
+ */
+export const CONDITIONAL_ELSE = "{{else}}";
+
+/**
+ * The tag that closes a conditional.
+ */
+export const CONDITIONAL_END = "{{/if}}";
+
+/**
+ * The name of that marker, as the variable pattern sees it.
+ */
+const ELSE_NAME = "else";
+
+/**
  * A variable that has no value.
  *
  * It is not an empty string: an empty string would leave a blank line
@@ -164,11 +184,56 @@ function findConditionalEnd(text, from) {
 }
 
 /**
+ * The `{{else}}` that belongs to the conditional whose body starts at
+ * `from`.
+ *
+ * The conditionals may be nested, and a nested one may have an `{{else}}`
+ * of its own — that one belongs to the inner block, not to this one. So
+ * the tags are walked by hand and the depth is counted, the same way the
+ * matching `{{/if}}` is found.
+ *
+ * @param {String} text - the whole template
+ * @param {Number} from - where the body of the conditional starts
+ * @param {Number} to - where the body ends
+ * @returns {Number} the position of the `{{else}}`, or -1 when there is none
+ */
+function findElse(text, from, to) {
+	const token =
+		/\{\{#if\s+[A-Za-z][A-Za-z0-9]*\s*\}|\{\{\/if\}\}|\{\{else\}\}/g;
+	let depth = 0;
+	token.lastIndex = from;
+	let match;
+	while ((match = token.exec(text))) {
+		if (match.index >= to) {
+			break;
+		}
+		if (match[0] === "{{/if}}") {
+			depth--;
+			if (depth < 0) {
+				break;
+			}
+		}
+		else if (match[0] === CONDITIONAL_ELSE) {
+			if (depth === 0) {
+				return match.index;
+			}
+		}
+		else {
+			depth++;
+		}
+	}
+	return -1;
+}
+
+/**
  * Resolve the conditionals of a template.
  *
  * A conditional whose variable is filled keeps its body — and the body may
  * hold conditionals of its own, which are resolved as well. One whose
  * variable is empty is removed completely, together with both of its tags.
+ *
+ * A conditional may have an `{{else}}`: the branch that is taken when the
+ * variable is empty. The branch that is not taken goes away with its lines.
  *
  * @param {String} text
  * @param {Object} values
@@ -201,12 +266,29 @@ export function renderConditionals(text, values, unknown = []) {
 			result += text.slice(openStart);
 			break;
 		}
+
+		// The body may hold an `{{else}}` of its own. Only the one that
+		// belongs to this conditional counts — the ones deeper down belong
+		// to the conditionals nested in it.
+		const elseAt = findElse(text, bodyStart, bodyEnd);
+		const thenText =
+			elseAt === -1
+				? text.slice(bodyStart, bodyEnd)
+				: text.slice(bodyStart, elseAt);
+		const elseText =
+			elseAt === -1
+				? ""
+				: text.slice(elseAt + CONDITIONAL_ELSE.length, bodyEnd);
+
 		if (isFilled(values[name])) {
-			result += renderConditionals(text.slice(bodyStart, bodyEnd), values, unknown);
+			result += renderConditionals(thenText, values, unknown);
+		}
+		else if (elseText) {
+			// The other branch is taken. The place the first branch took is
+			// still marked, so the lines it used go with it.
+			result += SKIPPED + renderConditionals(elseText, values, unknown);
 		}
 		else {
-			// The block was not taken. Its place is marked, so the empty
-			// line it leaves behind goes with it.
 			result += SKIPPED;
 		}
 		index = afterEnd;
@@ -237,6 +319,12 @@ export function renderTemplate(template, vars) {
 	text = renderConditionals(text, values, unknown);
 
 	text = text.replace(VARIABLE, (match, name) => {
+		if (name === ELSE_NAME) {
+			// The branch marker. It only gets here when the template is
+			// broken — a balanced conditional eats its own `{{else}}`.
+			// The checker says so; here it is left as it is.
+			return match;
+		}
 		if (!Object.prototype.hasOwnProperty.call(values, name)) {
 			if (!unknown.includes(name)) {
 				unknown.push(name);
@@ -291,6 +379,10 @@ export function templateVariables(template) {
 	const names = [];
 	const text = String(template || "");
 	for (const match of text.matchAll(/\{\{\s*([A-Za-z][A-Za-z0-9]*)\s*\}\}/g)) {
+		// The branch marker looks like a variable, but it is not one.
+		if (match[1] === ELSE_NAME) {
+			continue;
+		}
 		if (!names.includes(match[1])) {
 			names.push(match[1]);
 		}
@@ -337,18 +429,39 @@ export function validateTemplate(template) {
 	// Count the conditionals that are opened and closed. The engine
 	// pairs them with brackets, so a missing `{{/if}}` swallows the rest
 	// of the template — worth saying out loud.
-	let depth = 0;
+	//
+	// The stack holds the open conditionals; every one of them counts its
+	// own `{{else}}`s, so an `{{else}}` that belongs to no conditional —
+	// or a second one in the same block — is found as well.
+	const stack = [];
 	let lowest = 0;
-	for (const match of text.matchAll(/\{\{#if\s+[A-Za-z][A-Za-z0-9]*\s*\}\}|\{\{\/if\}\}/g)) {
+	let strayElse = 0;
+	let doubleElse = 0;
+	for (const match of text.matchAll(
+		/\{\{#if\s+[A-Za-z][A-Za-z0-9]*\s*\}\}|\{\{\/if\}\}|\{\{else\}\}/g,
+	)) {
 		if (match[0].startsWith("{{#if")) {
-			depth++;
+			stack.push(0);
+		}
+		else if (match[0] === CONDITIONAL_ELSE) {
+			if (!stack.length) {
+				strayElse++;
+			}
+			else {
+				stack[stack.length - 1]++;
+				if (stack[stack.length - 1] > 1) {
+					doubleElse++;
+				}
+			}
+		}
+		else if (stack.length) {
+			stack.pop();
 		}
 		else {
-			depth--;
-			lowest = Math.min(lowest, depth);
+			lowest = Math.min(lowest, -1);
 		}
 	}
-	const unbalanced = depth > 0 ? depth : -lowest;
+	const unbalanced = stack.length > 0 ? stack.length : -lowest;
 
 	if (unknown.length) {
 		problems.push(`unknown variables: ${unknown.join(", ")}`);
@@ -360,6 +473,12 @@ export function validateTemplate(template) {
 	}
 	else if (unbalanced < 0) {
 		problems.push("there is a {{/if}} without a {{#if}}");
+	}
+	if (strayElse) {
+		problems.push("there is an {{else}} without a {{#if}}");
+	}
+	if (doubleElse) {
+		problems.push("a conditional has more than one {{else}}");
 	}
 
 	return { unknown, unbalanced, problems };

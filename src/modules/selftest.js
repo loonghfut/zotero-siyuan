@@ -287,6 +287,98 @@ async function testPreferencesPane(addon) {
 			new win.Event("input", { bubbles: true, cancelable: false }),
 		);
 
+		// --- the conditional blocks ------------------------------------
+		// The pane has to put a conditional around the *selected* text —
+		// and the button takes the focus away from the editor, so the
+		// selection has to survive the click.
+		const controls = {
+			variable: doc.getElementById(
+				"zotero-prefpane-zoteroSiYuan-conditional-variable",
+			),
+			if: doc.getElementById("zotero-prefpane-zoteroSiYuan-conditional-if"),
+			else: doc.getElementById(
+				"zotero-prefpane-zoteroSiYuan-conditional-else",
+			),
+			end: doc.getElementById(
+				"zotero-prefpane-zoteroSiYuan-conditional-end",
+			),
+		};
+		for (const [name, control] of Object.entries(controls)) {
+			if (!control) {
+				throw new Error(
+					`the pane has no "${name}" control for the conditionals`,
+				);
+			}
+		}
+
+		const body = "{{commentCallout}}";
+		area.value = body;
+		area.dispatchEvent(
+			new win.Event("input", { bubbles: true, cancelable: false }),
+		);
+		await sleep(200);
+
+		controls.variable.value = "comment";
+		// Select the text that is to go into the block. The selection
+		// event is what tells the pane where the text is.
+		area.focus();
+		area.setSelectionRange(0, body.length);
+		area.dispatchEvent(new win.Event("select", { bubbles: true }));
+		await sleep(150);
+
+		controls.if.dispatchEvent(
+			new win.MouseEvent("click", { bubbles: true, cancelable: true }),
+		);
+		await sleep(300);
+		const wrapped = area.value;
+
+		// The other end of the block, and its other branch.
+		area.focus();
+		area.setSelectionRange(wrapped.length, wrapped.length);
+		area.dispatchEvent(new win.Event("select", { bubbles: true }));
+		await sleep(100);
+		controls.end.dispatchEvent(
+			new win.MouseEvent("click", { bubbles: true, cancelable: true }),
+		);
+		await sleep(250);
+		const withEnd = area.value;
+
+		area.focus();
+		area.setSelectionRange(withEnd.length, withEnd.length);
+		area.dispatchEvent(new win.Event("select", { bubbles: true }));
+		await sleep(100);
+		controls.else.dispatchEvent(
+			new win.MouseEvent("click", { bubbles: true, cancelable: true }),
+		);
+		await sleep(250);
+		const withElse = area.value;
+
+		const conditionals = {
+			wrapped: wrapped.includes("{{#if comment}}"),
+			// The selected text has to be *inside* the block, not replaced
+			// by it.
+			inside: wrapped.includes(`{{#if comment}}\n${body}\n{{/if}}`),
+			elseBranch: withElse.includes("{{else}}"),
+			endTag: withEnd.includes("{{/if}}"),
+			value: withElse,
+		};
+		if (!conditionals.wrapped || !conditionals.inside) {
+			throw new Error(
+				`the pane did not put the conditional around the selection: ${JSON.stringify(wrapped)}`,
+			);
+		}
+		if (!conditionals.elseBranch || !conditionals.endTag) {
+			throw new Error(
+				`the pane did not insert the else and the end: ${JSON.stringify(withElse)}`,
+			);
+		}
+
+		// Put the user's template back, exactly as it was.
+		area.value = original;
+		area.dispatchEvent(
+			new win.Event("input", { bubbles: true, cancelable: false }),
+		);
+
 		return {
 			variables: rows.length,
 			variable: name,
@@ -294,6 +386,7 @@ async function testPreferencesPane(addon) {
 			saved,
 			before,
 			after,
+			conditionals,
 		};
 	}
 	finally {

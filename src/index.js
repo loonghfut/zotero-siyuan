@@ -47,6 +47,9 @@ import {
 import {
 	insertToken,
 	insertVariable,
+	insertConditional,
+	insertConditionalTag,
+	conditionalToken,
 	variableToken,
 } from "./modules/template-edit.js";
 import { runDiagnostics } from "./modules/diagnostics.js";
@@ -1017,6 +1020,28 @@ class ZoteroSiYuanAddon {
   /** The token of a template variable. */
   variableToken(name) {
     return variableToken(name);
+  }
+
+  /**
+   * Put a conditional around the selection, or an empty one in its place.
+   *
+   * The tags go on lines of their own, and the text that was selected is
+   * left exactly as it was.
+   */
+  insertConditional(text, name, start, end) {
+    return insertConditional(text, name, start, end);
+  }
+
+  /**
+   * Put a single conditional tag — `{{else}}` or `{{/if}}` — on its own line.
+   */
+  insertConditionalTag(text, tag, start, end) {
+    return insertConditionalTag(text, tag, start, end);
+  }
+
+  /** The token that opens a conditional. */
+  conditionalToken(name) {
+    return conditionalToken(name);
   }
 
   /** The templates that are ready to use. */

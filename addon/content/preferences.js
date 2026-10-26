@@ -33,12 +33,24 @@ var ZoteroSiYuanPreferences = {
   PROBLEMS_ID: "zotero-prefpane-zoteroSiYuan-template-problems",
   FILTER_ID: "zotero-prefpane-zoteroSiYuan-variable-filter",
   ONLY_USED_ID: "zotero-prefpane-zoteroSiYuan-variable-only-used",
+  CONDITIONAL_VARIABLE_ID: "zotero-prefpane-zoteroSiYuan-conditional-variable",
+  CONDITIONAL_IF_ID: "zotero-prefpane-zoteroSiYuan-conditional-if",
+  CONDITIONAL_ELSE_ID: "zotero-prefpane-zoteroSiYuan-conditional-else",
+  CONDITIONAL_END_ID: "zotero-prefpane-zoteroSiYuan-conditional-end",
 
   XHTML: "http://www.w3.org/1999/xhtml",
 
   // Every variable the plugin knows about, and the ones the current
   // template already uses.
   _variables: [],
+
+  // Where the caret is, and how far the selection reaches.
+  //
+  // Clicking a button takes the focus away from the editor, so the place
+  // has to be remembered while the editor still has it — and a selection
+  // is worth keeping, because a conditional wraps it.
+  _caret: null,
+  _caretEnd: null,
 
   init: function () {
     if (typeof document === "undefined") {
@@ -56,6 +68,9 @@ var ZoteroSiYuanPreferences = {
 
     document.addEventListener("click", (e) => {
       var target = e.target;
+      // The place the caret is at is worth knowing before the click takes
+      // the focus away from the editor.
+      this._trackCaret(target);
       if (!target || !target.id) {
         // The variable list is not a button — it carries the variable name
         // on the row itself.
@@ -86,6 +101,18 @@ var ZoteroSiYuanPreferences = {
         e.preventDefault();
         this.applyPreset();
       }
+      else if (target.id === this.CONDITIONAL_IF_ID) {
+        e.preventDefault();
+        this.insertConditional(this._chosenConditionalVariable());
+      }
+      else if (target.id === this.CONDITIONAL_ELSE_ID) {
+        e.preventDefault();
+        this.insertConditionalTag("{{else}}");
+      }
+      else if (target.id === this.CONDITIONAL_END_ID) {
+        e.preventDefault();
+        this.insertConditionalTag("{{/if}}");
+      }
       else if (target.id === this.RESCAN_BUTTON_ID) {
         e.preventDefault();
         this.rescan();
@@ -98,7 +125,7 @@ var ZoteroSiYuanPreferences = {
         return;
       }
       if (target.id === this.TEMPLATE_ID) {
-        this._caret = target.selectionStart;
+        this._trackCaret(target);
         this.onTemplateInput();
       }
       else if (target.id === this.FILTER_ID) {
@@ -116,10 +143,17 @@ var ZoteroSiYuanPreferences = {
     // Remember where the caret was, so a variable can be inserted there even
     // though clicking the list takes the focus away from the editor.
     document.addEventListener("focusin", (e) => {
-      var target = e.target;
-      if (target && target.id === this.TEMPLATE_ID) {
-        this._caret = target.selectionStart;
-      }
+      this._trackCaret(e.target);
+    });
+
+    // The caret also moves without an input event — the arrow keys, a drag
+    // through the text. Every way of changing it is watched, so the
+    // selection is still there when a button is pressed.
+    document.addEventListener("keyup", (e) => {
+      this._trackCaret(e.target);
+    });
+    document.addEventListener("select", (e) => {
+      this._trackCaret(e.target);
     });
 
     document.addEventListener("keydown", (e) => {
@@ -133,6 +167,7 @@ var ZoteroSiYuanPreferences = {
         var result = this._insert(area.value, "  ", start, end);
         area.value = result.value;
         this._caret = result.caret;
+        this._caretEnd = result.caret;
         this._focusCaret(area, result.caret);
         this.onTemplateInput();
         return;
@@ -212,6 +247,47 @@ var ZoteroSiYuanPreferences = {
   },
 
   /**
+   * Remember where the caret is and how far the selection reaches.
+   *
+   * The selection changes without an input event — the arrow keys, a drag
+   * through the text — so every way of changing it is watched.
+   *
+   * @param {Object} target - the element the event came from
+   */
+  _trackCaret: function (target) {
+    if (!target || target.id !== this.TEMPLATE_ID) {
+      return;
+    }
+    this._caret = target.selectionStart;
+    this._caretEnd = target.selectionEnd;
+  },
+
+  /**
+   * Where the next insertion goes.
+   *
+   * The editor may have lost the focus already — a button takes it — so
+   * the place that was remembered is used then.
+   *
+   * @param {Object} area - the template editor
+   * @returns {{start: Number, end: Number}}
+   */
+  _selectionRange: function (area) {
+    var focused =
+      area.ownerDocument && area.ownerDocument.activeElement === area;
+    if (focused) {
+      return { start: area.selectionStart, end: area.selectionEnd };
+    }
+    if (typeof this._caret === "number") {
+      return {
+        start: this._caret,
+        end:
+          typeof this._caretEnd === "number" ? this._caretEnd : this._caret,
+      };
+    }
+    return { start: area.value.length, end: area.value.length };
+  },
+
+  /**
    * Insert a variable into the template at the caret.
    *
    * @param {String} name - the variable name, without the braces
@@ -227,21 +303,16 @@ var ZoteroSiYuanPreferences = {
       ? addon.variableToken(name)
       : "{{" + name + "}}";
 
-    var focused =
-      area.ownerDocument && area.ownerDocument.activeElement === area;
-    var start = focused ? area.selectionStart : this._caret;
-    var end = focused ? area.selectionEnd : start;
-    if (typeof start !== "number") {
-      start = area.value.length;
-    }
+    var range = this._selectionRange(area);
 
     // A callout has to start a line of its own, and the indentation of the
     // line it lands on is kept — so the template stays readable.
     var result = addon.insertVariable
-      ? addon.insertVariable(area.value, token, start, end)
-      : addon.insertToken(area.value, token, start, end);
+      ? addon.insertVariable(area.value, token, range.start, range.end)
+      : addon.insertToken(area.value, token, range.start, range.end);
     area.value = result.value;
     this._caret = result.caret;
+    this._caretEnd = result.caret;
 
     // Take the focus back, so several variables can be inserted in a row.
     this._focusCaret(area, result.caret);
@@ -253,6 +324,78 @@ var ZoteroSiYuanPreferences = {
       this._text("zoteroSiYuan-pref-inserted", "Inserted ") + token,
       false,
     );
+  },
+
+  /**
+   * Put a conditional around the selected text.
+   *
+   * With a selection the block wraps it — the text itself is not touched.
+   * Without one an empty block is made, and the caret lands between the
+   * two tags.
+   *
+   * @param {String} name - the variable to test
+   */
+  insertConditional: function (name) {
+    var area = document.getElementById(this.TEMPLATE_ID);
+    var addon = Zotero.ZoteroSiYuan;
+    if (!area || !addon || !addon.insertConditional) {
+      return;
+    }
+    var range = this._selectionRange(area);
+    var result = addon.insertConditional(
+      area.value,
+      name,
+      range.start,
+      range.end,
+    );
+    area.value = result.value;
+    this._caret = result.caret;
+    this._caretEnd = result.caret;
+    this._focusCaret(area, result.caret);
+    this._fireInput(area, "{{#if " + name + "}}");
+    this._setStatus(
+      this._text("zoteroSiYuan-pref-inserted", "Inserted ") +
+        "{{#if " +
+        name +
+        "}}",
+      false,
+    );
+  },
+
+  /**
+   * Put a single conditional tag on a line of its own.
+   *
+   * @param {String} tag - `{{else}}` or `{{/if}}`
+   */
+  insertConditionalTag: function (tag) {
+    var area = document.getElementById(this.TEMPLATE_ID);
+    var addon = Zotero.ZoteroSiYuan;
+    if (!area || !addon || !addon.insertConditionalTag) {
+      return;
+    }
+    var range = this._selectionRange(area);
+    var result = addon.insertConditionalTag(
+      area.value,
+      tag,
+      range.start,
+      range.end,
+    );
+    area.value = result.value;
+    this._caret = result.caret;
+    this._caretEnd = result.caret;
+    this._focusCaret(area, result.caret);
+    this._fireInput(area, tag);
+    this._setStatus(
+      this._text("zoteroSiYuan-pref-inserted", "Inserted ") + tag,
+      false,
+    );
+  },
+
+  /** The variable the conditional dropdown is on. */
+  _chosenConditionalVariable: function () {
+    var select = document.getElementById(this.CONDITIONAL_VARIABLE_ID);
+    var name = select ? String(select.value || "") : "";
+    return name || "comment";
   },
 
   /** Put the caret somewhere and keep the focus in the editor. */
@@ -324,6 +467,7 @@ var ZoteroSiYuanPreferences = {
     this._variables = help.variables || [];
     this._renderPresets();
     this._renderVariables(this._filteredVariables());
+    this._renderConditionalVariables();
     this._showProblems(help.template);
     this._refreshPreview();
   },
@@ -386,6 +530,33 @@ var ZoteroSiYuanPreferences = {
       option.value = presets[i].id;
       option.textContent = presets[i].name;
       select.appendChild(option);
+    }
+  },
+
+  /**
+   * Fill the list of the variables a conditional may test.
+   *
+   * The list is the same one the cheat sheet shows, so a name the user
+   * knows from there can be picked here as well.
+   */
+  _renderConditionalVariables: function () {
+    var select = document.getElementById(this.CONDITIONAL_VARIABLE_ID);
+    if (!select) {
+      return;
+    }
+    select.textContent = "";
+    for (var i = 0; i < this._variables.length; i++) {
+      var option = document.createElementNS(this.XHTML, "option");
+      option.value = this._variables[i].name;
+      option.textContent = "{{" + this._variables[i].name + "}}";
+      select.appendChild(option);
+    }
+    // The comment is the variable a conditional is used for most often.
+    for (var j = 0; j < this._variables.length; j++) {
+      if (this._variables[j].name === "comment") {
+        select.value = "comment";
+        break;
+      }
     }
   },
 

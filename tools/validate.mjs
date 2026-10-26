@@ -455,6 +455,70 @@ section("Send template");
     !/\[!note\]/.test(withoutComment.text),
     withoutComment.text.slice(0, 160),
   );
+
+  // --- the other branch of a conditional ---------------------------------
+  const branch = "{{#if comment}}分支一\n{{comment}}\n{{else}}分支二\n{{/if}}";
+  check(
+    "the branch of a filled variable is taken",
+    renderTemplate(branch, { comment: "我的批注" }).text ===
+      "分支一\n我的批注\n",
+    renderTemplate(branch, { comment: "我的批注" }).text,
+  );
+  check(
+    "the other branch of an empty variable is taken",
+    renderTemplate(branch, { comment: "" }).text === "分支二\n",
+    renderTemplate(branch, { comment: "" }).text,
+  );
+  check(
+    "the branch that is not taken leaves nothing behind",
+    // The lines of the branch that was not taken must go with it — an
+    // empty line is a place in the note that nothing fills.
+    !/分支一/.test(renderTemplate(branch, { comment: "" }).text),
+    renderTemplate(branch, { comment: "" }).text,
+  );
+
+  // The else of a nested conditional belongs to the inner block.
+  const nested =
+    "{{#if a}}A\n{{#if b}}B\n{{else}}B-else\n{{/if}}\n{{else}}A-else\n{{/if}}";
+  check(
+    "an else belongs to the conditional it is written in",
+    renderTemplate(nested, { a: "1", b: "" }).text === "A\nB-else\n\n",
+    renderTemplate(nested, { a: "1", b: "" }).text,
+  );
+  check(
+    "the outer else is taken when the outer variable is empty",
+    renderTemplate(nested, { a: "", b: "2" }).text === "A-else\n",
+    renderTemplate(nested, { a: "", b: "2" }).text,
+  );
+
+  // The else marker looks like a variable — it must not be looked up as one.
+  const { templateVariables, validateTemplate } = await import(
+    new URL("../src/modules/template.js", import.meta.url).href
+  );
+  check(
+    "the else marker is not a variable",
+    !templateVariables("{{#if a}}x{{else}}y{{/if}}").includes("else"),
+    templateVariables("{{#if a}}x{{else}}y{{/if}}").join(", "),
+  );
+  check(
+    "an else without a conditional is found",
+    validateTemplate("{{else}}").problems.some((p) =>
+      p.includes("{{else}}"),
+    ),
+    validateTemplate("{{else}}").problems.join(" / "),
+  );
+  check(
+    "a second else in the same block is found",
+    validateTemplate("{{#if a}}x{{else}}y{{else}}z{{/if}}").problems.some((p) =>
+      p.includes("more than one"),
+    ),
+    validateTemplate("{{#if a}}x{{else}}y{{else}}z{{/if}}").problems.join(" / "),
+  );
+  check(
+    "a template with an else has no unknown variables",
+    validateTemplate("{{#if comment}}x{{else}}y{{/if}}").unknown.length === 0,
+    validateTemplate("{{#if comment}}x{{else}}y{{/if}}").unknown.join(", "),
+  );
 }
 
 /* --------------------- 8. inserting a variable at the caret -------------- */
@@ -516,6 +580,158 @@ section("Template editing");
     "inserting into an empty template works",
     empty.value === "{{x}}",
     empty.value,
+  );
+
+  // --- the conditional, put in by hand -----------------------------------
+  const {
+    insertConditional,
+    insertConditionalTag,
+    conditionalToken,
+  } = await import(
+    new URL("../src/modules/template-edit.js", import.meta.url).href
+  );
+
+  check(
+    "a conditional token names the variable",
+    conditionalToken("comment") === "{{#if comment}}",
+    conditionalToken("comment"),
+  );
+
+  // The heart of it: a selection is wrapped, and the text inside it is
+  // left exactly as it was.
+  const template = "> [!quote] 摘录\n{{commentCallout}}\n\n[{{title}}]({{link}})";
+  const start = template.indexOf("{{commentCallout}}");
+  const end = start + "{{commentCallout}}".length;
+  const wrapped = insertConditional(template, "comment", start, end);
+  check(
+    "a conditional wraps the selection",
+    wrapped.value ===
+      "> [!quote] 摘录\n{{#if comment}}\n{{commentCallout}}\n{{/if}}\n\n[{{title}}]({{link}})",
+    wrapped.value,
+  );
+  check(
+    "the text inside the block is not changed",
+    wrapped.value.includes("\n{{commentCallout}}\n{{/if}}"),
+    wrapped.value,
+  );
+  check(
+    "the caret lands inside the block",
+    wrapped.caret > start && wrapped.caret < start + wrapped.value.length - start,
+    String(wrapped.caret),
+  );
+
+  // Without a selection an empty block is made.
+  const blank = insertConditional("", "comment", 0, 0);
+  check(
+    "an empty conditional is made without a selection",
+    blank.value === "{{#if comment}}\n\n{{/if}}",
+    blank.value,
+  );
+  check(
+    "the caret lands between the two tags",
+    // Right after the line break that follows the opening tag — the empty
+    // line the body is written on.
+    blank.caret === blank.value.indexOf("\n") + 1,
+    String(blank.caret),
+  );
+
+  // The tags stand on lines of their own.
+  check(
+    "an else tag gets a line of its own",
+    insertConditionalTag("a\nb", "{{else}}", 2, 2).value === "a\n{{else}}\nb",
+    insertConditionalTag("a\nb", "{{else}}", 2, 2).value,
+  );
+  check(
+    "an end tag gets a line of its own",
+    insertConditionalTag("a\nb", "{{/if}}", 2, 2).value === "a\n{{/if}}\nb",
+    insertConditionalTag("a\nb", "{{/if}}", 2, 2).value,
+  );
+  check(
+    "the indentation of the line is kept",
+    insertConditionalTag("a\n  b", "{{else}}", 4, 4).value ===
+      "a\n  {{else}}\nb",
+    insertConditionalTag("a\n  b", "{{else}}", 4, 4).value,
+  );
+}
+
+/* ------------- 8b. the conditionals in the preferences pane ------------- */
+
+section("Conditional blocks in the pane");
+{
+  // Writing `{{#if …}}…{{/if}}` by hand is the part of the template that
+  // people get wrong — so the pane has to offer it as a button.
+  const xhtml = readFileSync(
+    join(ROOT, "addon", "content", "preferences.xhtml"),
+    "utf8",
+  );
+  const pane = readFileSync(
+    join(ROOT, "addon", "content", "preferences.js"),
+    "utf8",
+  );
+  const index = readFileSync(join(ROOT, "src", "index.js"), "utf8");
+
+  for (const id of [
+    "conditional-variable",
+    "conditional-if",
+    "conditional-else",
+    "conditional-end",
+  ]) {
+    check(
+      `the pane offers "${id}"`,
+      xhtml.includes(`zoteroSiYuan-${id}`),
+    );
+  }
+  check(
+    "the pane inserts a block, an else and an end",
+    pane.includes("this.insertConditional(") &&
+      pane.includes('this.insertConditionalTag("{{else}}")') &&
+      pane.includes('this.insertConditionalTag("{{/if}}")'),
+  );
+  check(
+    "the pane fills the list of the variables a conditional may test",
+    pane.includes("_renderConditionalVariables") &&
+      pane.includes("this._variables[i].name"),
+  );
+  check(
+    "the plugin offers the conditional insertion",
+    index.includes("insertConditional(text, name, start, end)") &&
+      index.includes("insertConditionalTag(text, tag, start, end)"),
+  );
+
+  // The heart of the feature: the selected text has to survive the click
+  // on the button — the button takes the focus away from the editor.
+  const conditionalMethod = pane.slice(
+    pane.indexOf("insertConditional: function"),
+    pane.indexOf("insertConditionalTag: function"),
+  );
+  const trackMethod = pane.slice(
+    pane.indexOf("_trackCaret: function"),
+    pane.indexOf("_selectionRange: function"),
+  );
+  check(
+    "the pane keeps the selection while the button is pressed",
+    // The range has to come from the remembered selection — not from a
+    // fixed place, and not from the editor's own focus.
+    /var range = this\._selectionRange\(area\);/.test(conditionalMethod) &&
+      /insertConditional\(\s*area\.value,\s*name,\s*range\.start,\s*range\.end/s.test(
+        conditionalMethod,
+      ),
+  );
+  check(
+    "the remembered selection reaches the editor",
+    // The range is only remembered when the caret moves — the arrow keys
+    // and a drag change it without an input event. Both ends of the
+    // selection have to be remembered, or the selection is lost.
+    trackMethod.includes("this._caret = target.selectionStart;") &&
+      trackMethod.includes("this._caretEnd = target.selectionEnd;"),
+  );
+  check(
+    "the pane watches every way the selection changes",
+    // The arrow keys and a drag change the selection without an input
+    // event — and the caret has to be remembered all the same.
+    pane.includes('addEventListener("select"') &&
+      pane.includes('addEventListener("keyup"') &&
+      pane.includes('addEventListener("focusin"'),
   );
 }
 

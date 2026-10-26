@@ -47,6 +47,14 @@
   margin-inline: 8px;
 }
 
+/* The variable a conditional tests. */
+#zotero-prefpane-zoteroSiYuan-conditional-variable {
+  flex: 1;
+  min-width: 10em;
+  margin-inline-end: 8px;
+  font-family: monospace;
+}
+
 /* What is wrong with the template. */
 .zotero-siyuan-problems {
   display: none;
