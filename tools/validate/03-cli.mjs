@@ -1,0 +1,337 @@
+/**
+ * Zotero → SiYuan — the static checks for The siyuan CLI: where it is, and what it answers.
+ *
+ * Part of `node tools/validate.mjs`: this file runs when it is imported, and
+ * the entry point prints the summary. `check()` and `section()` come from
+ * `harness.mjs`, together with the source readers.
+ */
+
+import {
+  ROOT,
+  check,
+  section,
+} from "./harness.mjs";
+import { existsSync, readFileSync } from "node:fs";
+import { join } from "node:path";
+
+/* ------------------ 5. the CLI search paths are correct ---------------- */
+
+section("siyuan CLI search paths");
+const { buildCandidatePaths } = await import(
+  new URL("../../src/modules/siyuan.js", import.meta.url).href
+);
+const home = process.env.USERPROFILE || process.env.HOME || "";
+const localAppData = process.env.LOCALAPPDATA || "";
+const roamingAppData = process.env.APPDATA || "";
+const isWin = process.platform === "win32";
+const candidates = buildCandidatePaths({
+  home,
+  localAppData,
+  roamingAppData,
+  isWin,
+  isMac: process.platform === "darwin",
+});
+
+check(
+  "the LocalAppData candidate is present",
+  localAppData
+    ? candidates.includes(
+        `${localAppData}\\Programs\\SiYuan\\resources\\kernel\\siyuan.exe`,
+      )
+    : true,
+  "n/a on this platform",
+);
+check(
+  "the Roaming AppData candidate is not mistaken for the local one",
+  !localAppData ||
+    !candidates.includes(
+      `${roamingAppData}\\Programs\\SiYuan\\resources\\kernel\\siyuan.exe`,
+    ) ||
+    !candidates.includes(
+      `${localAppData}\\Programs\\SiYuan\\resources\\kernel\\siyuan.exe`,
+    ),
+);
+
+// The plugin must find the CLI even when only the home directory is known:
+// `Services.dirsvc` is not reachable in every scope a plugin runs in.
+{
+  const fromHome = buildCandidatePaths({ home, isWin: true });
+  check(
+    "a candidate can be derived from the home directory alone",
+    fromHome.includes(
+      `${home}\\AppData\\Local\\Programs\\SiYuan\\resources\\kernel\\siyuan.exe`,
+    ),
+    fromHome.join(" | "),
+  );
+}
+
+// If SiYuan is installed on this machine, the real binary must be reachable.
+const realCli = isWin
+  ? `${localAppData}\\Programs\\SiYuan\\resources\\kernel\\siyuan.exe`
+  : "/Applications/SiYuan.app/Contents/Resources/kernel/siyuan";
+if (existsSync(realCli)) {
+  check(
+    `the installed siyuan.exe is among the candidates (${realCli})`,
+    candidates.includes(realCli),
+    "auto-detection would miss it",
+  );
+}
+else {
+  console.log(`  [SKIP] siyuan is not installed at ${realCli}`);
+}
+
+// The probe has to be runnable, not merely correct: it calls four helpers
+// that live in `utils/paths.js`. One of them was left behind when the file
+// was split, and the ReferenceError turned into "Could not find the siyuan
+// CLI" — the plugin looked as if SiYuan were not installed, but only on a
+// machine where `siyuan` is not on PATH.
+{
+  const { SiYuanProcess } = await import(
+    new URL("../../src/modules/siyuan-process.js", import.meta.url).href
+  );
+  const hadZotero = "Zotero" in globalThis;
+  const hadServices = "Services" in globalThis;
+  const oldZotero = globalThis.Zotero;
+  const oldServices = globalThis.Services;
+  globalThis.Zotero = { isWin, isMac: process.platform === "darwin", debug() {} };
+  globalThis.Services = { env: { get: (name) => process.env[name] ?? "" } };
+  let paths = [];
+  let error = "";
+  try {
+    paths = new SiYuanProcess().candidatePaths();
+  }
+  catch (e) {
+    error = String(e && e.message ? e.message : e);
+  }
+  finally {
+    if (hadZotero) globalThis.Zotero = oldZotero;
+    else delete globalThis.Zotero;
+    if (hadServices) globalThis.Services = oldServices;
+    else delete globalThis.Services;
+  }
+  check(
+    "the install locations can be worked out at all",
+    error === "" && Array.isArray(paths) && paths.length > 0,
+    error || `${paths.length} candidate(s)`,
+  );
+}
+
+/* ------------------ 6. the HTTP fallback can find a workspace ------------ */
+
+section("SiYuan HTTP fallback discovery");
+{
+  // The kernel counts *failed* authentications and locks itself out after
+  // too many of them, so this must try the configured workspace first and
+  // stop after a couple of tries — exactly like the plugin does.
+  const preferred = process.env.SIYUAN_WORKSPACE || "D:\\siyi";
+  const appDirs = [
+    join(home, ".config", "siyuan"),
+    join(home, "Library", "Application Support", "siyuan"),
+    join(home, "AppData", "Roaming", "siyuan"),
+  ];
+  const workspaces = [];
+  for (const appDir of appDirs) {
+    const listPath = join(appDir, "workspace.json");
+    if (!existsSync(listPath)) continue;
+    let list = [];
+    try {
+      list = JSON.parse(readFileSync(listPath, "utf8"));
+    }
+    catch (e) {
+      continue;
+    }
+    for (const entry of list) {
+      const dir = typeof entry === "string" ? entry : entry.path;
+      if (dir && !workspaces.includes(dir)) workspaces.push(dir);
+    }
+  }
+  workspaces.sort((a, b) => (a === preferred ? -1 : b === preferred ? 1 : 0));
+
+  let found = null;
+  const errors = [];
+  let attempts = 0;
+  for (const dir of workspaces) {
+    const confPath = join(dir, "conf", "conf.json");
+    if (!existsSync(confPath)) continue;
+    let conf;
+    try {
+      conf = JSON.parse(readFileSync(confPath, "utf8"));
+    }
+    catch (e) {
+      continue;
+    }
+    if (!conf.api || !conf.api.token) continue;
+    if (++attempts > 3) break;
+    const port = conf.api.port || 6806;
+    // The plugin verifies the token by authenticating; so does this test.
+    try {
+      const response = await fetch(
+        `http://127.0.0.1:${port}/api/notebook/lsNotebooks`,
+        {
+          method: "POST",
+          headers: {
+            Authorization: `Token ${conf.api.token}`,
+            "Content-Type": "application/json",
+          },
+          body: "{}",
+        },
+      );
+      const body = await response.json();
+      if (body.code === 0) {
+        found = {
+          dir,
+          token: conf.api.token,
+          port,
+          notebooks: (body.data.notebooks || []).map((n) => n.name),
+        };
+        break;
+      }
+      errors.push(`${dir}: ${body.msg}`);
+    }
+    catch (e) {
+      // kernel not running for this workspace — try the next one
+      errors.push(`${dir}: ${e.message}`);
+    }
+  }
+  const rateLimited = errors.some((e) =>
+    /429|too many|认证失败次数过多|rate-limit/i.test(e),
+  );
+  if (found) {
+    check(
+      "a workspace with a working API token can be discovered",
+      true,
+    );
+    console.log(
+      `         → ${found.dir} (port ${found.port}, notebooks: ${found.notebooks.join(", ")})`,
+    );
+  }
+  else if (rateLimited) {
+    // The kernel locks itself out after too many *failed* authentications.
+    // That is a state of the machine, not a defect of the plugin — and it
+    // cannot be judged from here, so it is reported rather than failed.
+    console.log(
+      "  [SKIP] the SiYuan kernel is rate-limiting authentication attempts;" +
+        " the discovery check cannot be judged right now",
+    );
+  }
+  else {
+    check(
+      "a workspace with a working API token can be discovered",
+      false,
+      errors.length ? errors.join(" | ") : "no workspace authenticated",
+    );
+  }
+}
+
+/* --------------- 6b. the write answers name the block they made ------------- */
+
+section("The write path names its block");
+{
+  // `dailynote append` answers with the *document* id, `block append` with
+  // the id of the block. Reading that wrong is invisible: the note is
+  // written, but every link points at “[object Object]”. So both answers
+  // are checked against the shape the kernel really sends.
+  const { extractAppendResult } = await import(
+    new URL("../../src/modules/siyuan-http.js", import.meta.url).href
+  );
+  const { isBlockID, blockCreatedAt } = await import(
+    new URL("../../src/modules/siyuan.js", import.meta.url).href
+  );
+
+  check(
+    "a block id is recognized",
+    isBlockID("20261026173312-7zsvcqk") &&
+      !isBlockID("20261026173312") &&
+      !isBlockID("[object Object]") &&
+      blockCreatedAt("20261026173312-7zsvcqk") === "20261026173312",
+  );
+
+  // The real answer of /api/block/appendDailyNoteBlock.
+  const transactions = [
+    {
+      timestamp: 0,
+      doOperations: [
+        {
+          action: "insert",
+          id: "20261026173329-lj2kzr6",
+          parentID: "20261026121440-rw08hra",
+          rootID: "",
+          data: "<div data-node-id=\"20261026173329-lj2kzr6\"></div>",
+        },
+      ],
+    },
+  ];
+  check(
+    "the ids are read out of the kernel's transactions",
+    extractAppendResult(transactions).blockID === "20261026173329-lj2kzr6" &&
+      extractAppendResult(transactions).documentID ===
+        "20261026121440-rw08hra",
+  );
+  check(
+    "a plain id is accepted as well",
+    extractAppendResult("20261026173329-lj2kzr6").blockID ===
+      "20261026173329-lj2kzr6",
+  );
+  check(
+    "an object answer is searched too",
+    extractAppendResult({ id: "20261026173312-7zsvcqk" }).blockID ===
+      "20261026173312-7zsvcqk",
+  );
+  check(
+    "an answer without an id does not invent one",
+    extractAppendResult({}).blockID === "" &&
+      extractAppendResult(null).blockID === "",
+  );
+
+  const cli = readFileSync(join(ROOT, "src", "modules", "siyuan.js"), "utf8");
+  check(
+    "the CLI creates the daily note and then appends to it",
+    cli.includes('"dailynote"') &&
+      cli.includes('"create"') &&
+      /"block",\s*\n\s*"append",/.test(cli) &&
+      cli.includes("blockCreatedAt"),
+  );
+  check(
+    "the old one-shot command is only the fallback",
+    cli.includes("The fallback:") && cli.includes("falling back to"),
+  );
+  check(
+    "the daily note is created once, not once per send",
+    // `dailynote create` is a process. The document of a day does not move,
+    // so it is remembered — and recreated when the write says it is gone.
+    cli.includes("async dailyNoteDocument(notebookID)") &&
+      /_dailyNote = \{ key, documentID \}/.test(cli) &&
+      cli.includes("dailyNoteKey(notebookID)") &&
+      /remembered[\s\S]{0,400}?this\._dailyNote = null;/.test(cli),
+  );
+  check(
+    "the sibling blocks cost a process only when they are asked for",
+    /collectBlocks = false/.test(cli) &&
+      /const blocks = collectBlocks\s*\?[\s\S]{0,80}newBlocksSince\(/.test(cli),
+  );
+  check(
+    "only the blocks a write created are attributed to it",
+    // A timestamp alone cannot separate our blocks from a note the user
+    // wrote in the same second — so the document is read *before* the write
+    // as well, and only the difference counts. `blocksExact` says whether
+    // that was possible; a caller that deletes must look at it.
+    /let before = collectBlocks\s*\?[\s\S]{0,90}findBlocksSince\(documentID, since\)/.test(
+      cli,
+    ) &&
+      /blocksExact/.test(cli) &&
+      /!known\.has\(id\)/.test(cli),
+  );
+  check(
+    "a clean-up can tell whether its deletion took",
+    // `block delete` answers "success" for a block that is already gone,
+    // so the self test asks the workspace instead of trusting the command.
+    /findExistingBlocks\(/.test(cli),
+  );
+  check(
+    "a failed write says whether it may have written",
+    // The daily note is recreated when a write to it fails, which is only
+    // safe while nothing was written — so the two flags are what the
+    // decision hangs on.
+    /e\.timedOut \|\| e\.written/.test(cli),
+  );
+}

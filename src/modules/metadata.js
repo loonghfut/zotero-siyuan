@@ -6,6 +6,24 @@
  * so the template engine stays trivial.
  */
 
+import { getString } from "../utils/locale.js";
+
+/**
+ * The label of one metadata line, in the language of the interface.
+ *
+ * The separator that follows it is part of the interface too: a Chinese
+ * label takes the full-width colon, everything else the ASCII one.
+ *
+ * @param {String} name - the key after `label-`
+ * @param {String} fallback
+ * @returns {String}
+ */
+function metaLabel(name, fallback) {
+	const label = getString(`zoteroSiYuan-label-${name}`, fallback);
+	const separator = /[\u3400-\u9fff]/.test(label) ? "：" : ": ";
+	return `${label}${separator}`;
+}
+
 /**
  * Escape the characters that would otherwise be interpreted as Markdown
  * structure inside a paragraph.
@@ -87,9 +105,34 @@ export function getCreatorList(item) {
 		.join("、");
 }
 
+/**
+ * The library segment of a Zotero deep link.
+ *
+ * Zotero has one URL shape for "My Library" and another one for a group —
+ * `zotero://open/groups/<id>/items/KEY`. Writing the personal one for a
+ * group item does not fail loudly: Zotero looks the key up in the user's
+ * own library, finds nothing, and the link just does not go anywhere.
+ *
+ * @param {Number} libraryID
+ * @returns {String} "library", or "groups/<id>"
+ */
+export function libraryPath(libraryID) {
+	const id = Number(libraryID) || 0;
+	let userLibraryID = 1;
+	try {
+		userLibraryID = Zotero.Libraries.userLibraryID;
+	}
+	catch (e) {
+		// Not reachable in every scope — 1 is the user library in Zotero.
+	}
+	return !id || id === userLibraryID ? "library" : `groups/${id}`;
+}
+
 /** A link that opens the item in Zotero. */
-export function itemLink(itemKey) {
-	return itemKey ? `zotero://select/library/items/${itemKey}` : "";
+export function itemLink(itemKey, libraryID = 0) {
+	return itemKey
+		? `zotero://select/${libraryPath(libraryID)}/items/${itemKey}`
+		: "";
 }
 
 /**
@@ -103,6 +146,7 @@ export function annotationLink({
 	attachmentKey,
 	annotationKey,
 	page,
+	libraryID = 0,
 	fallback = "",
 }) {
 	if (!attachmentKey || !annotationKey) {
@@ -113,7 +157,10 @@ export function annotationLink({
 	if (page) {
 		params.set("page", String(page));
 	}
-	return `zotero://open/library/items/${attachmentKey}?${params.toString()}`;
+	return (
+		`zotero://open/${libraryPath(libraryID)}/items/${attachmentKey}` +
+		`?${params.toString()}`
+	);
 }
 
 /** A link that opens a block in the SiYuan desktop app. */
@@ -121,8 +168,41 @@ export function siyuanBlockLink(blockID) {
 	return blockID ? `siyuan://blocks/${blockID}` : "";
 }
 
-/** Tag names, whether they arrive as strings or as objects. */
-function tagNames(tags) {
+/**
+ * A Zotero timestamp, as something a note can show.
+ *
+ * Zotero stores dates as SQL strings in **UTC** ("2026-10-26 03:12:00"), so
+ * showing one as it is would put a time in the note that the user never saw
+ * on their clock. It is converted to local time, and to minutes: a note does
+ * not need seconds.
+ *
+ * @param {String} value
+ * @returns {String}
+ */
+function readableStamp(value) {
+	const text = String(value || "").trim();
+	if (!text) {
+		return "";
+	}
+	try {
+		const date = Zotero.Date.sqlToDate(text, true);
+		if (!date || Number.isNaN(date.getTime())) {
+			return text;
+		}
+		const pad = (n) => String(n).padStart(2, "0");
+		return (
+			`${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}` +
+			` ${pad(date.getHours())}:${pad(date.getMinutes())}`
+		);
+	}
+	catch (e) {
+		// Not a date this Zotero can read — the raw value is still better
+		// than nothing.
+		return text;
+	}
+}
+
+/** Tag names, whether they arrive as strings or as objects. */function tagNames(tags) {
 	if (!tags || !tags.length) {
 		return [];
 	}
@@ -180,23 +260,24 @@ function itemTypeName(item) {
 function buildMetadataBlock(vars) {
 	const lines = [];
 	if (vars.authors) {
-		lines.push(`作者：${vars.authors}`);
+		lines.push(metaLabel("author", "作者") + vars.authors);
 	}
 	if (vars.year) {
-		lines.push(`年份：${vars.year}`);
+		lines.push(metaLabel("year", "年份") + vars.year);
 	}
 	if (vars.publication) {
-		lines.push(`出处：${vars.publication}`);
+		lines.push(metaLabel("publication", "出处") + vars.publication);
 	}
 	if (vars.page) {
-		lines.push(`页码：${vars.page}`);
+		lines.push(metaLabel("page", "页码") + vars.page);
 	}
 	if (vars.annotator) {
-		lines.push(`批注人：${vars.annotator}`);
+		lines.push(metaLabel("annotator", "批注人") + vars.annotator);
 	}
-	if (vars.itemKey) {
+	if (vars.zoteroAnnotationLink) {
 		lines.push(
-			`来源：[${vars.titleInline}](${vars.zoteroAnnotationLink})`,
+			metaLabel("source", "来源") +
+				`[${vars.titleInline}](${vars.zoteroAnnotationLink})`,
 		);
 	}
 	return lines.join("  \n");
@@ -213,6 +294,8 @@ function buildMetadataBlock(vars) {
  * @param {String} options.image - the Markdown of the picture, for an
  *   annotation whose content is a picture (an area selection)
  * @param {Object} options.extra - { date, time, timestamp }
+ * @param {String} options.annotationDate - the annotation's last modified
+ *   time, when the item behind it had to be asked for it
  * @returns {Object} the variables
  */
 export function collectMetadata({
@@ -222,12 +305,25 @@ export function collectMetadata({
 	annotationKey = "",
 	image = "",
 	extra = {},
+	annotationDate = "",
 }) {
 	const quote = String(annotation.text || "").trim();
 	const comment = String(annotation.comment || "").trim();
-	const title = field(parentItem, "title");
-	const itemKey = parentItem ? parentItem.key || "" : "";
+	// A PDF that stands on its own — dropped into the library, never
+	// attached to an item — has no parent to take a title from. Falling
+	// back to the attachment keeps the note identifiable, and it keeps the
+	// link the plugin needs to find the note again after a restart.
+	const source = parentItem || attachment || null;
+	const title = field(source, "title");
+	const itemKey = source ? source.key || "" : "";
 	const attachmentKey = attachment ? attachment.key || "" : "";
+	// Which library the item lives in — a group library needs a different
+	// deep link than "My Library", or the link leads nowhere.
+	const libraryID = Number(
+		(attachment && attachment.libraryID) ||
+			(source && source.libraryID) ||
+			0,
+	);
 	const page = annotation.pageLabel || "";
 	const annotator = annotation.authorName || "";
 	const authors = getCreatorList(parentItem);
@@ -252,7 +348,9 @@ export function collectMetadata({
 		page,
 		pageNumber: pageNumberOf(annotation),
 		annotator,
-		annotatorDate: annotation.dateModified || "",
+		// The reader's annotation JSON carries no date at all, so the value
+		// comes from the item — see `_buildContent`.
+		annotatorDate: readableStamp(annotation.dateModified || annotationDate),
 		annotationType: annotation.type || "",
 		annotationId: annotationKey || annotation.id || "",
 		annotationTags: tagNames(annotation.tags).join(", "),
@@ -266,19 +364,20 @@ export function collectMetadata({
 		titleInline: escapeInline(title),
 		authors,
 		author: authors ? authors.split("、")[0] : "",
-		year: getYear(parentItem),
-		publication: field(parentItem, "publicationTitle"),
-		volume: field(parentItem, "volume"),
-		issue: field(parentItem, "issue"),
-		pages: field(parentItem, "pages"),
-		doi: field(parentItem, "DOI"),
-		isbn: field(parentItem, "ISBN"),
-		url: field(parentItem, "url"),
-		abstract: field(parentItem, "abstractNote"),
-		itemType: itemTypeName(parentItem),
-		tags: parentItem ? tagNames(parentItem.getTags()).join(", ") : "",
+		year: getYear(source),
+		publication: field(source, "publicationTitle"),
+		volume: field(source, "volume"),
+		issue: field(source, "issue"),
+		pages: field(source, "pages"),
+		doi: field(source, "DOI"),
+		isbn: field(source, "ISBN"),
+		url: field(source, "url"),
+		abstract: field(source, "abstractNote"),
+		itemType: itemTypeName(source),
+		tags: source ? tagNames(source.getTags()).join(", ") : "",
 		itemKey,
 		attachmentKey,
+		libraryID,
 
 		// --- when ------------------------------------------------------
 		date: extra.date || "",
@@ -286,11 +385,12 @@ export function collectMetadata({
 		timestamp: extra.timestamp || "",
 	};
 
-	vars.zoteroLink = itemLink(itemKey);
+	vars.zoteroLink = itemLink(itemKey, libraryID);
 	vars.zoteroAnnotationLink = annotationLink({
 		attachmentKey,
 		annotationKey,
 		page: vars.pageNumber,
+		libraryID,
 		fallback: vars.zoteroLink,
 	});
 	vars.metadata = buildMetadataBlock(vars);

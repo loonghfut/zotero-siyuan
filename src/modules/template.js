@@ -432,9 +432,12 @@ export function validateTemplate(template) {
 	//
 	// The stack holds the open conditionals; every one of them counts its
 	// own `{{else}}`s, so an `{{else}}` that belongs to no conditional —
-	// or a second one in the same block — is found as well.
+	// or a second one in the same block — is found as well. A `{{/if}}`
+	// with nothing to close is counted separately: it is the opposite
+	// mistake, and reporting it as "not closed" sends the user looking at
+	// the wrong end of the template.
 	const stack = [];
-	let lowest = 0;
+	let strayClose = 0;
 	let strayElse = 0;
 	let doubleElse = 0;
 	for (const match of text.matchAll(
@@ -458,10 +461,12 @@ export function validateTemplate(template) {
 			stack.pop();
 		}
 		else {
-			lowest = Math.min(lowest, -1);
+			strayClose++;
 		}
 	}
-	const unbalanced = stack.length > 0 ? stack.length : -lowest;
+	// A positive number is what is still open; a stray `{{/if}}` is
+	// reported on its own, so this is never negative.
+	const unbalanced = stack.length;
 
 	if (unknown.length) {
 		problems.push(`unknown variables: ${unknown.join(", ")}`);
@@ -471,8 +476,10 @@ export function validateTemplate(template) {
 			`${unbalanced} conditional${unbalanced > 1 ? "s are" : " is"} not closed`,
 		);
 	}
-	else if (unbalanced < 0) {
-		problems.push("there is a {{/if}} without a {{#if}}");
+	if (strayClose > 0) {
+		problems.push(
+			`${strayClose} {{/if}} without a {{#if}}`,
+		);
 	}
 	if (strayElse) {
 		problems.push("there is an {{else}} without a {{#if}}");
@@ -481,7 +488,7 @@ export function validateTemplate(template) {
 		problems.push("a conditional has more than one {{else}}");
 	}
 
-	return { unknown, unbalanced, problems };
+	return { unknown, unbalanced, strayClose, problems };
 }
 
 /**

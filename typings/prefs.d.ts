@@ -11,8 +11,11 @@ declare namespace _ZoteroTypes {
       "workspace": string;
       "notebook": string;
       "template": string;
+      "imageCompress": string;
+      "imageQuality": string;
       "selfTest": string;
       "selfTestWrite": string;
+      "silentProtocol": string;
     };
   }
 }

@@ -4,4 +4,8 @@ dist/
 *.xpi
 *.log
 .DS_Store
-.env.local
+# Local configuration: machine paths and tokens stay out of the repository.
+.env
+.env.*
+# Assistant notes for this working copy.
+.workbuddy/

@@ -8,6 +8,11 @@
  *
  * The manifest and `package.json` are kept in step — `npm run check`
  * compares them.
+ *
+ * The version is also written into the code, so the plugin can say which
+ * build is really running. The addon manager keeps its *own* copy of the
+ * version, and that copy can be a version behind the code: the script is
+ * read fresh, the cached manifest is not.
  */
 import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -16,6 +21,7 @@ import { fileURLToPath } from "node:url";
 const ROOT = fileURLToPath(new URL("..", import.meta.url));
 const MANIFEST = join(ROOT, "addon", "manifest.json");
 const PACKAGE = join(ROOT, "package.json");
+const VERSION_FILE = join(ROOT, "src", "version.js");
 
 function bump(version) {
 	const parts = String(version || "0.0.0").split(".");
@@ -39,5 +45,22 @@ pkg.version = next;
 
 writeFileSync(MANIFEST, `${JSON.stringify(manifest, null, 2)}\n`, "utf8");
 writeFileSync(PACKAGE, `${JSON.stringify(pkg, null, 2)}\n`, "utf8");
+
+// The version goes into the code as well, so that the running plugin can
+// say which build it is — the addon's own cache cannot be trusted for it.
+writeFileSync(
+	VERSION_FILE,
+	`/**
+ * The version of this build.
+ *
+ * Written by \`tools/bump-version.mjs\` on every build, so it always says
+ * the same thing as the manifest. The addon manager keeps its own copy of
+ * the version, and that copy can be a version behind the code that is
+ * really running.
+ */
+export const VERSION = ${JSON.stringify(next)};
+`,
+	"utf8",
+);
 
 console.log(`version → ${next}`);

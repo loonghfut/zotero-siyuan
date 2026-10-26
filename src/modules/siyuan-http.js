@@ -31,6 +31,81 @@ const WORKSPACE_LIST_FILES = [
  */
 const MAX_AUTH_ATTEMPTS = 3;
 
+/**
+ * What a block id looks like: `YYYYMMDDHHMMSS-xxxxxxx`.
+ */
+const BLOCK_ID = /^\d{14}-[0-9a-z]{7}$/i;
+
+/** A string that is a block id, or "". */
+function blockIDOf(value) {
+  const text = typeof value === "string" ? value.trim() : "";
+  return BLOCK_ID.test(text) ? text : "";
+}
+
+/**
+ * Read the block and document ids out of an append answer.
+ *
+ * The kernel answers `appendDailyNoteBlock` with an array of transactions;
+ * `appendBlock` answers with `{ id }`. Both shapes — and a few plausible
+ * neighbours — are searched, because the shape is the kernel's to change
+ * and a wrong guess would turn every "open in SiYuan" link into
+ * `siyuan://blocks/[object Object]`.
+ *
+ * @param {*} data - the `data` field of the kernel's answer
+ * @returns {{blockID: String, documentID: String}}
+ */
+export function extractAppendResult(data) {
+  let blockID = "";
+  let documentID = "";
+
+  const visit = (node, depth) => {
+    if (!node || depth > 4 || (blockID && documentID)) {
+      return;
+    }
+    if (typeof node === "string") {
+      if (!blockID) {
+        blockID = blockIDOf(node);
+      }
+      return;
+    }
+    if (Array.isArray(node)) {
+      for (const item of node) {
+        visit(item, depth + 1);
+      }
+      return;
+    }
+    if (typeof node !== "object") {
+      return;
+    }
+    if (!blockID) {
+      for (const key of ["id", "blockID", "blockId"]) {
+        const id = blockIDOf(node[key]);
+        if (id) {
+          blockID = id;
+          break;
+        }
+      }
+    }
+    if (!documentID) {
+      for (const key of ["parentID", "parentId", "rootID", "rootId", "documentID"]) {
+        const id = blockIDOf(node[key]);
+        if (id) {
+          documentID = id;
+          break;
+        }
+      }
+    }
+    for (const key of ["doOperations", "data", "transactions", "result"]) {
+      if (node[key] !== undefined) {
+        visit(node[key], depth + 1);
+      }
+    }
+  };
+
+  visit(data, 0);
+  return { blockID, documentID };
+}
+
 export class SiYuanHTTP {
   constructor(options) {
     this.host = options.host || "127.0.0.1";
@@ -69,7 +144,12 @@ export class SiYuanHTTP {
     }
     if (result.code !== 0) {
       const reason = result.data && result.data.reason ? ` (${result.data.reason})` : "";
-      throw new Error(`SiYuan ${endpoint} failed${reason}: ${result.msg}`);
+      const error = new Error(`SiYuan ${endpoint} failed${reason}: ${result.msg}`);
+      // The kernel answered — it looked at the request and said no. That is
+      // a definite "nothing was written", unlike a request that never got
+      // an answer.
+      error.refused = true;
+      throw error;
     }
     return result.data;
   }
@@ -79,13 +159,63 @@ export class SiYuanHTTP {
     return (data && data.notebooks) || [];
   }
 
-  /** Append a Markdown block to today's daily note, creating it if needed. */
-  async appendDailyNote(notebookID, markdown) {
-    return await this.request("/api/block/appendDailyNoteBlock", {
-      notebook: notebookID,
-      dataType: "markdown",
-      data: markdown,
+  /**
+   * Run a SQL query against the workspace.
+   *
+   * The CLI can do the same (`siyuan sql`), and it is the first choice —
+   * but a machine where the CLI cannot be spawned still has a kernel that
+   * answers this endpoint, and without it every PDF would lose its
+   * "already sent" markers after a restart.
+   *
+   * @param {String} statement - a read-only SELECT
+   * @returns {Promise<Object[]>} the rows
+   */
+  async sql(statement) {
+    const data = await this.request("/api/query/sql", {
+      stmt: String(statement || ""),
     });
+    return Array.isArray(data) ? data : [];
+  }
+
+  /**
+   * Append a Markdown block to today's daily note, creating it if needed.
+   *
+   * The kernel answers with an **array of transactions**, not with a block
+   * id:
+   *
+   *   [{ "doOperations": [{ "id": "20261026173329-lj2kzr6",
+   *                         "parentID": "20261026121440-rw08hra", … }] }]
+   *
+   * Taking that array as the id would put `[object Object]` into every
+   * `siyuan://blocks/…` link, so the id is read out of it — and an answer
+   * of any other shape is searched too, because the kernel changes and a
+   * wrong guess must not become a broken link.
+   *
+   * @returns {Promise<{blockID: String, documentID: String}>}
+   */
+  async appendDailyNote(notebookID, markdown) {
+    let data;
+    try {
+      data = await this.request("/api/block/appendDailyNoteBlock", {
+        notebook: notebookID,
+        dataType: "markdown",
+        data: markdown,
+      });
+    }
+    catch (e) {
+      if (e && e.refused) {
+        // The kernel said no: nothing was written.
+        throw e;
+      }
+      // A timeout or a dropped connection: the request may well have been
+      // processed before the answer was lost. Saying so is what keeps the
+      // caller from sending the same note a second time.
+      const error = new Error(e && e.message ? e.message : String(e));
+      error.writeState = "unknown";
+      error.written = true;
+      throw error;
+    }
+    return extractAppendResult(data);
   }
 
   /**
@@ -267,7 +397,6 @@ export class SiYuanHTTP {
     const home = homeDir();
     if (home) {
       dirs.push(PathUtils.join(home, "SiYuan"));
-      dirs.push(PathUtils.join(home, "Desktop", "siyuanceshi"));
       dirs.push(PathUtils.join(home, "Documents", "SiYuan"));
     }
     return dirs;

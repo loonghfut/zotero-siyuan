@@ -102,6 +102,7 @@
 | `{{authors}}` `{{author}}` `{{year}}` `{{publication}}` | 作者 / 第一作者 / 年份 / 出处 |
 | `{{doi}}` `{{isbn}}` `{{url}}` `{{abstract}}` `{{itemType}}` `{{tags}}` | 其它文献字段 |
 | `{{page}}` `{{pageNumber}}` `{{annotator}}` `{{annotationType}}` | 注释所在页 / 批注人 / 注释类型 |
+| `{{annotatorDate}}` | 这条注释的最后修改时间（本地时钟，精确到分） |
 | `{{date}}` `{{time}}` `{{timestamp}}` | 发送当天日期与时刻 |
 | `{{zoteroLink}}` | 打开条目的 `zotero://` 链接 |
 | `{{zoteroAnnotationLink}}` | **直接跳到这条注释**的 PDF 位置 |
@@ -115,12 +116,45 @@
 现在这类注释会把**图片一起送到思源**：
 
 - 图片从 Zotero 的缓存里取（`<Zotero 数据目录>/cache/library/<注释 key>.png`），
-  **一个字节不改**地复制到思源工作空间的 `data/assets/` 下
-- Markdown 写成思源自己的样子：`![框选](assets/zotero-siyuan-<注释key>-<时间戳>.png)`
+  **压缩之后**放进思源工作空间的 `data/assets/` 下
+- Markdown 写成思源自己的样子：`![框选](assets/zotero-siyuan-<注释key>-<时间戳>.jpg)`
 - 图片放在 `> [!quote]` 引用块**里面** —— 框选的内容本身就是「摘录」，
   所以**默认模板不用改**就能正确输出
 - 思源内核会**自己**把这份资源登记进它的资源表并生成真正的 `<img>`，
   插件不需要再上传一次
+
+### 发送前先压缩
+
+框选注释的图片是**页面截图**：它带着一条**其实全不透明**的透明通道，
+所以每个像素要占四个字节 —— 一张 1918×819 的图能有 **975 KB**，
+里面其实只是一页白底黑字。
+
+插件在放进工作空间**之前**把它重新编码成 JPEG（透明处铺白底），
+体积掉一大截。下面是**实测**的数字（同一张 1741×803 的框选截图，原始 2,262,931 字节）：
+
+| 压缩质量 | 发出的大小 | 占原来的 |
+|---|---|---|
+| 30 | 136 KB | **6%** |
+| 82（默认） | 348 KB | **15%** |
+| 95 | 1,073 KB | **47%** |
+
+设置面板的「**框选图片**」里可以：
+
+- **关掉压缩** —— 想保留原始 PNG 就取消勾选
+- **自己定压缩程度** —— **10～100 随便填**，也可以拖滑块：
+  数字越小图越小也越糙，100 最大最清楚
+
+三条规矩：
+
+- **压完反而更大就保留原图** —— 已经是小图的图片不会因为压缩而变难看
+- **压缩失败不算错误** —— 笔记照写，只是图片没压（没有画布的环境里就是这样）
+- **JPEG 没有透明通道** —— 透明的地方铺成白色，和 PDF 页面的底色一致
+
+> 自检里会写清楚这张图**压没压、压前多大、压后多大**。
+> 压前的图超过 100 KB 却没压，会被当成**失败**报出来 —— 压缩坏了要有人知道。
+>
+> 自检报告里还有 `pluginVersion`：**跑的是哪一版代码**。
+> 换 XPI 之后 Firefox 可能还会用一版旧代码再跑一次 —— 这个字段一眼就能看出来。
 
 > **模板不用改也能有图。** 如果你的模板里没有 `{{image}}` 或 `{{imageCallout}}`，
 > 插件会把图片**自动追加**到笔记末尾 —— 选区不该因为模板写得早而丢失。
@@ -174,7 +208,13 @@ SELECT id, markdown, type FROM blocks
 WHERE markdown LIKE '%zotero://open/library/items/%'
 ```
 
-插件启动时扫一遍，把「注释 key → 思源块 ID」建成内存索引；发送新注释时立刻增量更新。
+**按 PDF 增量建索引**：某个 PDF 的侧边栏第一次出现时，只扫这个附件对应的块，把
+「注释 key → 思源块 ID」放进内存；发送新注释时立刻更新。
+
+> 以前是启动时全库扫一遍，而 `LIKE '%…%'` 这种前置通配的查询用不上任何索引 ——
+> 工作空间一大，每次启动 Zotero 都要等它。现在启动什么都不做，等真的打开一篇论文再说。
+> 要全量重建，设置面板里有「重新扫描已发送的注释」按钮。
+
 于是：
 
 - 你的 Zotero 库里**一个标记都不会留下**（没有 tag、没有备注、条目干净）
@@ -211,6 +251,16 @@ Zotero 启动时会恢复上次的阅读器标签页，而**阅读器可能在�
 阅读器给页码标签起的名字（`page_<注释 key>`）里读出来，补完之后按原样画进阅读器的盒子里。
 阅读器下次重绘时会用自己的那份把补的换掉 —— 外观完全一致。
 
+这一遍**不在启动的那一刻**跑（它要 spawn 一次索引查询，不该挡在窗口绘制前面），
+而且有三条出口，谁先到走谁：
+
+- **没有打开的阅读器**就根本不启动 —— 之后打开的阅读器都会自己把事件递过来；
+- 每个能看见的阅读器都**处理完了**（没有还在加载的）就收工；
+- 有阅读器一直没交出侧栏时，45 秒后放弃（间隔从 1 秒退避到 5 秒）。
+
+一个**没有注释**的阅读器不算「还在加载」：它现在没东西可补，以后加了注释会让阅读器
+重绘侧栏，而那次重绘插件是能听到的 —— 为它空转纯属浪费。
+
 > 只有**注释预览**里的盒子才算数：工具栏和划词弹窗也有同名的盒子，
 > 认错了就会把按钮插到工具栏里去（曾经真的发生过）。
 
@@ -221,8 +271,11 @@ Zotero 启动时会恢复上次的阅读器标签页，而**阅读器可能在�
 Windows 为 `siyuan://` 注册的程序，直接把它跑起来，URL 作为参数传过去 ——
 已在运行的思源窗口会被唤到前台并跳到那个块，全程不打扰。
 
-作为双保险，插件启动时还会设上 `network.protocol-handler.warn-external.siyuan = false`
-（就是那个确认框里"记住我的选择"复选框写的东西），所以万一走回退路径也不会再问。
+作为双保险，可以把偏好 `silentProtocol` 设成 `1`：插件会把
+`network.protocol-handler.warn-external.siyuan` 设为 `false`
+（就是那个确认框里"记住我的选择"复选框写的东西），失败的回退路线上也不会再问。
+
+> 这个偏好是**改全局浏览器设置**，所以默认不做，要你显式打开。
 
 > 插件沙箱里读不到注册表服务（`@mozilla.org/windows/registry-service;1` 是
 > `undefined`），所以查注册表用的是 `reg.exe` —— 而且 Gecko 的 `Subprocess`
@@ -256,20 +309,31 @@ export const SIYUAN_ICON_SHAPES = [
 
 | 做法 | 效果 |
 |---|---|
-| 索引**按 PDF 分片**查询 | 打开一篇论文只查它自己的块，不扫全工作空间 |
+| 索引**整个工作空间一次扫完** | `LIKE '%…%'` 本来就要读整张表，按 PDF 分片不会更快 —— 十篇论文从十次扫描变成一次（5 分钟内的新侧栏直接复用） |
+| 多个侧栏同时渲染时**共享同一次扫描** | 恢复八个标签页不会同时起八次全表查询 |
 | 侧边栏**事件委托** | 每个 reader 文档一个监听器，而不是每个标记一个 |
 | 只在**确实发过**时才建 DOM | 没发过的注释不产生任何额外节点 |
 | Fluent 标签**只解析一次** | 几百个注释头不会重复走一遍本地化 |
 | 索引刷新**先建后替换** | 查询失败不会把已经知道的映射弄丢 |
+| 日记文档 id **每个「笔记本 + 当天」只查一次** | 一次发送只起一个进程（约 0.65 秒，而不是 1.8 秒） |
+| 兄弟块列表**只在自检要清理时**才查 | 真实发送少跑一次 `sql` |
+| 手动 ↗ 标记按注释**记账**（`WeakMap`） | 渲染几百个注释头时不再每个都扫一遍整个文档 |
+| 附件条目与父条目**每批只读一次** | 批量发 50 条少 98 次条目读取 |
+| 同一张框选图**只压缩一次** | 再发一次不再解码 + 重编码整张截图（上限 12 张 / 32 MB，退出即清） |
+| 侧栏 watcher **会自己收工** | 没开阅读器就不启动，补完按钮就停，最长 45 秒 |
+
+发送期间**所有**发送按钮都会置灰（不只是被点的那一个）：连点两下不会再写第二条笔记。
 
 ## 批量发送
 
 在阅读器里选中多条注释 → 右键 → 「把 N 条注释发送到思源笔记」。
-每条都按同一套模板渲染，依次写入，结果用气泡汇总。
+每条都按同一套模板渲染，**依次**写入（一次发送只起一个进程，两条同时写会抢同一篇日记），
+气泡里实时显示「正在发送 3/12…」，全部写完同一个气泡变成结果汇总。
 
 ## 发送后的反馈
 
 写入成功后右下角会弹一个气泡，写明写进了哪个笔记本，并带一个「在思源中打开」的链接。
+气泡**出现在你正在看的那个窗口里**（阅读器就弹在阅读器里，不是弹在背后的条目列表上）。
 
 ## 为什么用 siyuan 命令行
 
@@ -277,8 +341,21 @@ export const SIYUAN_ICON_SHAPES = [
 思源的 HTTP API：
 
 ```
-siyuan dailynote append --notebook <笔记本 ID> --file <临时 md> -w <工作空间>
+# 1. 确保今天的日记存在（已经有了就返回它的文档 ID）
+siyuan dailynote create --notebook <笔记本 ID> -w <工作空间>
+
+# 2. 把这条笔记追加进日记，并拿到它写出来的块 ID
+siyuan block append --parent <日记文档 ID> --file <临时 md> -w <工作空间> -f json
+# → { "id": "20261026173312-7zsvcqk" }
 ```
+
+为什么不是一条 `dailynote append`：
+
+- **`dailynote append` 只回答日记文档的 ID，不回答它写了哪个块。** 以前只能拿「创建时间 >=
+  发送前那一秒」去 SQL 里捞，同一秒里连发两条就会串位 —— 侧栏回链指到上一条注释的块上。
+- **`block append` 直接回答块 ID**，回链和索引都不需要猜。
+- 老命令行没有 `block append` 时，插件会自动退回 `dailynote append` + 按时间戳查块，
+  功能不丢，只是那条退路上仍然有「同一秒」的歧义。
 
 这样做的好处：
 
@@ -286,7 +363,7 @@ siyuan dailynote append --notebook <笔记本 ID> --file <临时 md> -w <工作�
   插件永远和思源自己的设置一致。
 - **不受思源 3.8 的「结构化标题模式」影响。** 思源 3.8 起，老的
   `getIDsByHPath` / `createDocWithMd(path)` 接口在开了结构化模式的笔记本里会直接报
-  `legacyPathUnsupported`；而 `siyuan dailynote append` 已经把这层兼容处理好了。
+  `legacyPathUnsupported`；而 CLI 的日记命令已经把这层兼容处理好了。
 - 日记不存在时由 CLI 负责创建（包括 `daily note/2026/10/2026-10-25` 这样的多层路径）。
 
 > HTTP 兜底有个必须知道的坑：思源内核会**统计失败的鉴权并锁死自己**
@@ -301,37 +378,79 @@ siyuan dailynote append --notebook <笔记本 ID> --file <临时 md> -w <工作�
 
 ```
 zotero-siyuan/
-├── package.json                 # 插件 ID、命名空间、偏好前缀
+├── package.json                  # 插件 ID、命名空间、偏好前缀
 ├── zotero-plugin.config.ts       # 构建配置（esbuild / FTL / 偏好前缀）
-├── tsconfig.json
-├── .env                         # `npm start` 用的 Zotero 路径与 profile
-├── src/                         # 插件逻辑（esbuild 打包）
-│   ├── index.js                 #   入口：注册阅读器事件、偏好面板
-│   ├── modules/siyuan.js        #   siyuan CLI 客户端
-│   ├── modules/siyuan-http.js   #   思源 HTTP API 兜底
-│   ├── modules/siyuan-image.js   #   框选注释的截图：取图、放进思源 assets
-│   ├── modules/metadata.js      #   元信息采集 + 深链生成
-│   ├── modules/template.js      #   发送模板引擎 + 变量表
-│   ├── modules/siyuan-index.js   #   「已发送」索引（只存在思源里）
-│   ├── modules/icons.js         #   思源图标（内联 SVG）
-│   ├── modules/siyuan-launcher.js #  直接启动思源，不弹协议确认框
-│   ├── modules/toast.js         #   通知气泡
-│   ├── modules/selftest.js      #   端到端自检
-│   ├── modules/diagnostics.js   #   故障诊断报告
+├── .env                          # `npm start` 用的 Zotero 路径与 profile
+├── src/                          # 插件逻辑（esbuild 打包成一个脚本）
+│   ├── index.js                  #   装配点：一个类，构造函数 + 生命周期
+│   ├── version.js                #   版本号（每次构建更新）
+│   ├── app/                      #   插件行为，一个文件一件事
+│   │   ├── constants.js          #     共享常量：ID、样式串、缓存时长
+│   │   ├── reader-ui.js          #     阅读器侧栏按钮、补丁、监听
+│   │   ├── reader-marks.js       #     「已发送」↗ 标记与回链
+│   │   ├── send.js               #     发送链路：单条 / 批量
+│   │   ├── content.js            #     生成正文：模板 + 图片 + 回收
+│   │   ├── lookup.js             #     解析 Zotero 对象（注释/父项/附件）
+│   │   ├── transport.js          #     与思源通信：CLI、HTTP、笔记本
+│   │   ├── preferences-api.js    #     设置页面用的接口 + 偏好读写
+│   │   └── diagnostics-api.js    #     自检与诊断报告的入口
+│   ├── modules/                  #   可以脱离插件单测的模块
+│   │   ├── siyuan.js             #     siyuan 命令（笔记本、日记、块）
+│   │   ├── siyuan-process.js     #     启动进程、超时、读输出
+│   │   ├── siyuan-http.js        #     思源 HTTP API 兜底
+│   │   ├── siyuan-image.js       #     框选截图的对外门面（转出下面的 picture/）
+│   │   ├── picture/              #     框选截图，按关注点分三个文件
+│   │   │   ├── annotation.js     #       图在哪：缓存路径 / data URL / 是不是框选
+│   │   │   ├── bytes.js          #       图是什么：类型识别 + 压缩（canvas 两种策略）
+│   │   │   └── assets.js         #       图去哪：写进 assets、压缩缓存、回收
+│   │   ├── siyuan-index.js       #     「已发送」索引（只存在思源里）
+│   │   ├── siyuan-launcher.js    #     直接启动思源，不弹协议确认框
+│   │   ├── metadata.js           #     元信息采集 + 深链生成
+│   │   ├── template.js           #     发送模板引擎 + 变量表
+│   │   ├── template-edit.js      #     在编辑器光标处插入变量/条件
+│   │   ├── icons.js              #     思源图标（内联 SVG）
+│   │   ├── toast.js              #     通知气泡
+│   │   ├── diagnostics.js        #     故障诊断报告
+│   │   └── selftest/             #     端到端自检
+│   │       ├── index.js          #       跑一遍流程，汇总报告
+│   │       ├── report.js         #       日志、计时、报告落盘
+│   │       ├── fixtures.js       #       从库里挑 PDF/注释
+│   │       ├── pane.js           #       驱动真实设置页面
+│   │       ├── pictures.js       #       自检写出的图片的记账与回收
+│   │       └── steps/            #       每一步一个文件：markers / note / readers
 │   └── utils/{prefs,locale,paths,http}.js
-├── addon/                       # 静态资源，scaffold 会做占位符替换
-│   ├── bootstrap.js             #   生命周期钩子
-│   ├── manifest.json            #   清单（版本号必须每次构建都动）
-│   ├── prefs.js                 #   默认偏好
-│   ├── content/                 #   偏好面板、样式、图标
-│   └── locale/{en-US,zh-CN}/    #   Fluent 字符串
+├── addon/                        # 静态资源，scaffold 会做占位符替换
+│   ├── bootstrap.js              #   生命周期钩子
+│   ├── manifest.json             #   清单（版本号必须每次构建都动）
+│   ├── prefs.js                  #   默认偏好
+│   ├── content/                  #   偏好面板：xhtml + css + 6 个脚本
+│   │   ├── preferences.js        #     对象与共享工具（id、状态、提示）
+│   │   ├── preferences-template.js   # 模板编辑器、预览、预设
+│   │   ├── preferences-variables.js  # 变量列表、条件变量选择
+│   │   ├── preferences-pictures.js   # 图片压缩设置、框选检查
+│   │   ├── preferences-actions.js    # 测试连接、重扫、自检
+│   │   └── preferences-boot.js   #     最后加载，调用 init()
+│   └── locale/{en-US,zh-CN}/     #   Fluent 字符串
 ├── tools/
-│   ├── validate.mjs             # 静态回归闸门（npm run check）
-│   ├── sync-xpi.mjs             # 把构建产物同步到仓库根目录
-│   ├── make-sample.js           # 用插件自己的模板引擎生成样例
-│   └── siyuan-cleanup.mjs       # 清理自检留在日记里的块
-└── .scaffold/build/             # 构建产物（含 zotero-to-si-yuan.xpi）
+│   ├── validate.mjs              # 静态回归闸门（npm run check）—— 只是入口
+│   ├── validate/                 #   各项检查，一个区域一个文件
+│   ├── sync-xpi.mjs              #   把构建产物同步到仓库根目录
+│   ├── make-sample.js            #   用插件自己的模板引擎生成样例
+│   └── siyuan-cleanup.mjs        #   清理自检留在日记里的块
+└── .scaffold/build/              # 构建产物（含 zotero-to-si-yuan.xpi）
 ```
+
+### 为什么这样分
+
+- **`app/` 是行为的拼装，`modules/` 是能力。** `app/` 里的每个文件导出的是一个方法集合，
+  `src/index.js` 把它们装进同一个原型 —— Zotero 只认一个 `Zotero.ZoteroSiYuan` 对象，
+  但写代码时按功能翻文件。`modules/` 里是纯模块，可以单独 import 进 Node 跑。
+- **设置页的 6 个脚本共享同一个作用域。** Zotero 把 `scripts` 里的文件按顺序加载进面板作用域，
+  第一个建对象，中间几个用 `Object.assign` 加方法，最后一个 `preferences-boot.js` 才调用 `init()`。
+  **顺序变了面板就空**，`npm run check` 会核对这份顺序。
+- **一个文件一件事，最多 650 行。** 超过就该拆了；`tools/validate/00-layout.mjs` 每次检查都会
+  量一遍，顺便确认每个 `app/` 模块都被装进了原型、每个步骤文件都被调用到 —— 拆完忘记接线是这类
+  重构最常见的坑。
 
 ## 环境要求
 
@@ -356,7 +475,7 @@ Windows 上 `siyuan.exe` 通常在：
 npm install
 npm run build     # 产物：zotero-siyuan.xpi（构建后自动同步到仓库根目录）
 npm start         # 启动 Zotero 并热重载插件（开发用）
-npm run check     # 静态回归闸门（231 项）
+npm run check     # 静态回归闸门（257 项）
 ```
 
 `npm start` 需要先在 `.env` 里填好 Zotero 路径；它会建一个独立的 `dev` profile，
@@ -381,6 +500,11 @@ npm run check     # 静态回归闸门（231 项）
 - 标题里的方括号会被转义，不会把「来源」那行的链接拆坏；
 - **框选注释的图片真的能落地**：图片会被复制进工作空间的 `data/assets`、
   Markdown 指向它、没有文字的框选注释照样有摘录块、批量发送时也带着图；
+- **图片在发送前会被压缩**：页面截图带着一条全不透明的透明通道，
+  压成 JPEG 后通常只剩两成；压完更大就保留原图，压缩坏了也不算错误；
+  **压缩程度由用户自己定**（10～100，还能拖滑块）；
+- **压缩的规矩有闸门盯着**：压完更大不能用、压缩失败不能抛错、
+  关掉压缩就真的不压 —— 这三条都拆开验过，**去掉修复就会 FAIL**；
 - **模板没写图片变量时，图片也会进笔记**（自动追加），写了就只出现**一次**；
 - **没有值的变量不占位置**：一行里只有变量而它们都没有值时，整行消失；
   空的引用块也不是一个孤零零的 `>`；
@@ -414,39 +538,50 @@ npm run check     # 静态回归闸门（231 项）
 > [System.IO.File]::Copy(".\zotero-siyuan.xpi", "$profile\extensions\zotero-siyuan@example.com.xpi", $true)
 > (Get-FileHash "$profile\extensions\zotero-siyuan@example.com.xpi").Hash -eq (Get-FileHash ".\zotero-siyuan.xpi").Hash
 > ```
+>
+> **覆盖之后要重启两次才保险** —— 这一点是实测出来的，不是听说：
+> 换了 XPI 之后**第一次**启动 Zotero，跑的**还是旧代码**（自检报告里能看出来：
+> 它报告的字段是旧版的样子）；第二次启动才加载新代码。
+> 所以装完插件后**再重启一次 Zotero**，再去验证行为。
+> 怎么知道跑的是新代码？看自检报告里有没有新加的字段 ——
+> 比如图片压缩会多出 `compressed` / `originalSize` / `sentSize`。
 
 ## 端到端自检
 
-插件**自己就是自己的测试台**：启动时会在后台跑一次端到端自检，把结果写成 JSON 报告：
+插件**自己就是自己的测试台**：在设置页点一次「运行端到端自检」，它会把结果写成 JSON 报告：
 
 ```
 %LOCALAPPDATA%\Temp\Zotero\zotero-siyuan-selftest.json
 ```
 
+> 自检**默认不在启动时跑**。它要在后台轮询十几秒，以前还会在真实阅读器里点一次真实按钮 ——
+> 用户看到的是一个假的「已发送到思源笔记」气泡。现在只有设置页的按钮才会启动它。
+
 自检走的是**和你点按钮完全一样的代码路径**，一个环节都不 mock：
 
 ```
 renderSidebarAnnotationHeader 事件 → 真的按钮 → 真的 click()
-  → _send() → 渲染模板 → 解析笔记本 → 写思源 → 定位块 ID → 写进索引
+  → _send() → 渲染模板 → 解析笔记本 → 写思源 → 拿到块 ID → 写进索引
 ```
 
 默认是 **dry run**：最后一步换成 `siyuan dailynote append --dry-run`，让思源自己校验
 这条命令，但**不写任何东西**。
 
-把偏好 `extensions.zotero.zoteroSiYuan.selfTestWrite` 设成 `1`，自检就会**真写一次**：
-它会挑你库里一条真实的注释，发送、核对块 ID 记进了索引，然后**把自己留下的痕迹
-全部清掉**（删思源里的块）。
+把偏好 `extensions.zotero.zoteroSiYuan.selfTestWrite` 设成 `1`（在 `about:config` 里，
+布尔值 `true` 也认），自检就会**真写一次**：它会挑你库里一条真实的注释，发送、核对块 ID
+记进了索引，然后**把自己留下的痕迹全部清掉**（删思源里的块）。
 
-> 自检**只删自己写的那几个块**。它挑的是「这一次发送写出来的块」，
-> 而不是「这条注释在索引里指向的块」——后者可能是你自己早先发出去的那一条。
+> 自检**只删自己写的那几个块**。`block append` 会回答它写的第一个块，同一个 `created`
+> 秒内的顶层块都是这一次发送写出来的 —— 它们全部会被删掉，而不会碰到你自己早先发的那一条。
 > 清理之后，索引会指回你原来那个块。
 
 自检里还有两步是拿**真的阅读器**跑的：一步检查每个打开的阅读器都显示出了按钮
 （包括插件启动前就画好侧边栏的那种），一步在真的侧边栏里点一次按钮，确认
-**每条注释恰好一个 ↗**。这两步跑不动的时候（比如阅读器还没加载 PDF）会跳过并写明原因，
-不会误报失败。
+**每条注释恰好一个 ↗**。这两步只在设置页点按钮时运行（启动时的自检不碰阅读器），
+跑不动的时候（比如阅读器还没加载 PDF）会跳过并写明原因，不会误报失败。
 
-设置面板里也有一个「运行端到端自检」按钮，可以随时手动跑一次。
+> 自检里那一次点击不会弹「已发送」气泡，也不会把按钮改成「已发送」：
+> 那不是你的发送，就不该有你的反馈。
 
 失败时还会额外写一份 `zotero-siyuan-diagnostics.json`，里面有每个候选路径为什么不行、
 `Services.dirsvc` / `PathUtils` / `Services.env` 在插件作用域里到底能不能用等原始信息。
@@ -488,11 +623,18 @@ node tools/siyuan-cleanup.mjs --workspace "D:\siyi" --marker ZoteroSiYuanSelfTes
 | `workspace` | 空 | 思源工作空间目录。留空 = 用 `siyuan` 当前的工作空间 |
 | `notebook` | 空 | 写进哪个笔记本（名称或 ID）。留空 = 第一个笔记本 |
 | `template` | 空 | 发送模板。留空 = 内置默认模板 |
-| `selfTest` | `1` | 启动时跑一次端到端自检（dry run） |
+| `imageCompress` | `1` | 框选图片发送前压缩 |
+| `imageQuality` | `82` | JPEG 质量（10～100） |
+| `selfTest` | `0` | 启动时跑一次端到端自检（dry run）。默认关闭 |
 | `selfTestWrite` | 空 | 设成 `1` 时自检会真的写一条（写完自己清理） |
+| `silentProtocol` | 空 | 设成 `1` 才把 `network.protocol-handler.warn-external.siyuan` 置为 `false`（改的是全局浏览器偏好） |
 
 面板里的「测试连接」会跑一次 `siyuan workspace info` + `siyuan notebook list`，
 把找到的笔记本列出来，并显示**实际使用的**可执行文件路径和工作空间。
+
+命令行不可用时它会自动探测思源的 HTTP API：**两个通道任一可用就算连通**。
+只有 HTTP 走得通的时候，结果里会明确标注「通过思源 HTTP 接口连接（命令行不可用）」——
+发送照样能用，只是**重扫历史记录在建 index 时会慢一些**（走的是 HTTP 查询而不是本地 SQL）。
 
 > **路径分隔符的坑**：Firefox 启动外部程序前会检查
 > `PathUtils.isAbsolute(path)`，而 Gecko 在 Windows 上不认正斜杠路径 ——
@@ -515,10 +657,19 @@ siyuan notebook list -w "D:\siyi"
   某个词条在译文里缺失时退回英文，不会整条消失。
 - 注释面板的按钮由 `Zotero.Reader` 的 `renderSidebarAnnotationHeader` 事件注入。
   这是 Zotero 官方的阅读器扩展点，但 Zotero 每次升级都可能调整阅读器内部结构。
-- 插件每次启动都会跑一次自检（dry run，约 2 秒，后台进行）。不想要可以设
-  `extensions.zotero.zoteroSiYuan.selfTest` 为 `0`。
+- 有几处只能依赖 Zotero 的**私有成员**：`Zotero.Reader._readers`、`reader._iframeWindow`、
+  `ZoteroPane.document`。每一处都有 `try/catch` 兜底（拿不到就跳过，不会让发送失败）。但
+  Zotero 换大版本时，这几处是最该回归的地方：先在阅读器里点一次按钮，再看侧栏有没有出现 ↗。
+- 自检**默认不在启动时跑**。需要时在设置页点「运行端到端自检」；想让它每次启动都跑，
+  把 `extensions.zotero.zoteroSiYuan.selfTest` 设为 `1`（启动时那一趟不会碰阅读器）。
 - 自检在跑的时候**不会碰你的发送**：它只是在按钮被点中的那一瞬间挂上观察钩子，
   钩子只作用于它自己点的那一次。你在这期间自己点的按钮，写的还是你自己的日记。
+- 自检结束时会删掉它自己写的那几个块。如果它无法确认某个块是自己写的（比如走的
+  是 HTTP 接口，内核只回答第一个块 id），它就**只删那一个确定的**，其余一律留下 ——
+  宁可在日记里多留一段，也不删你自己的笔记。
+- 写入结果「不知道有没有成功」时（命令超时、输出读不出来），插件**不会重试，也不会
+  删掉那张图**。此时弹窗会留在屏幕上不动，提示你先看一眼今天的日记再决定要不要重发。
+  因为这种情况下重试很可能写出两条。
 
 ## 已验证的部分
 

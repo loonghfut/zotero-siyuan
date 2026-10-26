@@ -180,9 +180,19 @@ export async function findHandlerExecutable(scheme = SIYUAN_SCHEME) {
 		return match[1];
 	}
 
-	// Last resort: the default installation layout.
+	// Last resort: the default installation layout. `IOUtils.exists()`
+	// answers with a promise — used as a boolean it always says "yes",
+	// and the launcher would then try to start a file that is not there.
 	const fallback = defaultInstallPath();
-	return fallback && IOUtils.exists(fallback) ? fallback : "";
+	if (!fallback) {
+		return "";
+	}
+	try {
+		return (await IOUtils.exists(fallback)) ? fallback : "";
+	}
+	catch (e) {
+		return "";
+	}
 }
 
 /**

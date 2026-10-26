@@ -1,156 +1,293 @@
-/* Zotero → SiYuan — styles for the preferences pane. */
+/* Zotero → SiYuan — styles for the preferences pane.
+ *
+ * Zotero's own panes are built from XUL boxes, and the HTML controls a
+ * plugin brings are not styled by Zotero at all — a browser-default
+ * <input> next to a Zotero label looks broken. So the pane lays its rows
+ * out with CSS and gives every control a Zotero-like shape.
+ *
+ * The colours come from the platform keywords (`Canvas`, `Field`,
+ * `CanvasText`, `FieldText`), so the pane follows the light and the dark
+ * theme instead of hard-coding white.
+ */
 
-.zotero-siyuan-hint {
-  margin: 8px 0 4px 0;
-  font-size: 0.9em;
-  opacity: 0.75;
+/* ------------------------------------------------------------- layout */
+
+.main-section {
+  width: 100%;
+  max-width: 46em;
+  box-sizing: border-box;
 }
 
-.zotero-siyuan-result {
-  font-size: 0.9em;
-}
-
-.zotero-siyuan-status {
-  font-size: 0.9em;
-  opacity: 0.8;
-}
-
-.zotero-siyuan-template-head {
+.zsi-field {
+  display: grid;
+  grid-template-columns: 9em minmax(0, 1fr);
   align-items: center;
-  margin-bottom: 4px;
+  gap: 6px 12px;
+  width: 100%;
+  margin: 10px 0;
 }
 
-.zotero-siyuan-template-head > label {
-  margin-inline-end: 8px;
+.zsi-field > .zsi-label {
+  margin: 0;
+  color: inherit;
 }
 
-.zotero-siyuan-template-head > button {
-  margin-inline-end: 8px;
+.zsi-field-check {
+  grid-template-columns: auto minmax(0, 1fr);
+  justify-content: start;
+  gap: 8px;
 }
 
-.zotero-siyuan-template-head > label,
-.zotero-siyuan-template-head > button {
-  margin-block: 0;
-}
-
-/* The ready-made templates. */
-#zotero-prefpane-zoteroSiYuan-template-preset {
-  flex: 1;
-  min-width: 12em;
-  margin-inline-end: 8px;
-}
-
-/* The filter for the cheat sheet. */
-#zotero-prefpane-zoteroSiYuan-variable-filter {
-  flex: 1;
+/* The quality row carries a slider and a number. */
+.zsi-field > .zsi-range {
   min-width: 10em;
-  margin-inline: 8px;
 }
 
-/* The variable a conditional tests. */
-#zotero-prefpane-zoteroSiYuan-conditional-variable {
-  flex: 1;
-  min-width: 10em;
-  margin-inline-end: 8px;
-  font-family: monospace;
+.zsi-field > .zsi-number {
+  width: 5em;
+  justify-self: start;
+  margin-inline-start: 8px;
 }
 
-/* What is wrong with the template. */
-.zotero-siyuan-problems {
-  display: none;
-  margin: 0 0 6px 0;
-  padding: 6px 8px;
-  font-size: 0.9em;
-  color: var(--accent-red, #d33);
-  background: rgba(211, 51, 51, 0.1);
-  border: 1px solid rgba(211, 51, 51, 0.35);
+/* Filter + "only used" sit on one line under the variable list heading. */
+.zsi-field-filter {
+  grid-template-columns: 9em minmax(0, 1fr) auto;
+}
+
+.zsi-field-filter > .zsi-inline-check {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+}
+
+.zsi-field-conditional {
+  grid-template-columns: 9em minmax(0, 1.4fr) repeat(3, auto);
+  margin-top: 14px;
+}
+
+.zsi-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 12px 0 4px;
+}
+
+/* ----------------------------------------------------------- controls */
+
+.zsi-input,
+.zsi-select,
+.zsi-textarea,
+.zsi-number {
+  min-width: 0;
+  box-sizing: border-box;
+  font: inherit;
+  color: FieldText;
+  background: Field;
+}
+
+.zsi-input,
+.zsi-select,
+.zsi-number {
+  height: 26px;
+  padding: 2px 6px;
+  border: 1px solid color-mix(in srgb, CanvasText 25%, transparent);
   border-radius: 4px;
 }
 
-/* The template editor. */
-#zotero-prefpane-zoteroSiYuan-template {
+.zsi-input {
+  width: 100%;
+}
+
+.zsi-textarea {
+  display: block;
   width: 100%;
   min-height: 16em;
+  padding: 6px 8px;
+  border: 1px solid color-mix(in srgb, CanvasText 25%, transparent);
+  border-radius: 4px;
   font-family: monospace;
   font-size: 0.95em;
   line-height: 1.45;
-  padding: 6px;
-  box-sizing: border-box;
   resize: vertical;
   white-space: pre;
-  overflow-wrap: normal;
-  overflow-x: auto;
+  overflow: auto;
+}
+
+.zsi-input:focus-visible,
+.zsi-select:focus-visible,
+.zsi-textarea:focus-visible,
+.zsi-number:focus-visible,
+.zsi-range:focus-visible,
+.zsi-button:focus-visible {
+  outline: 2px solid var(--accent-blue, #4072e5);
+  outline-offset: 1px;
+}
+
+/* The range input keeps the platform look; it only has to be visible. */
+.zsi-range {
+  width: 100%;
+  accent-color: var(--accent-blue, #4072e5);
+}
+
+.zsi-checkbox {
+  margin: 0;
+}
+
+.zsi-button {
+  height: 26px;
+  padding: 0 12px;
+  border: 1px solid color-mix(in srgb, CanvasText 25%, transparent);
+  border-radius: 5px;
+  background: color-mix(in srgb, Field 96%, CanvasText 4%);
+  color: FieldText;
+  font: inherit;
+  line-height: 1;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.zsi-button:hover {
+  background: color-mix(in srgb, Field 88%, CanvasText 12%);
+}
+
+.zsi-button:active {
+  background: color-mix(in srgb, Field 80%, CanvasText 20%);
+}
+
+.zsi-button[disabled] {
+  opacity: 0.5;
+  cursor: default;
+}
+
+/* -------------------------------------------------------------- text */
+
+.zsi-hint,
+.zotero-siyuan-hint {
+  margin: 6px 0 10px;
+  font-size: 0.9em;
+  line-height: 1.5;
+  opacity: 0.75;
+}
+
+.zsi-subhead {
+  display: block;
+  margin: 12px 0 4px;
+  font-weight: 600;
+}
+
+.zsi-result,
+.zsi-status {
+  margin: 6px 0 0;
+  font-size: 0.9em;
+  line-height: 1.45;
+  word-break: break-word;
+  user-select: text;
+}
+
+.zsi-status {
+  margin: 0;
+  opacity: 0.85;
+}
+
+/* What is wrong with the template. */
+.zsi-problems,
+.zotero-siyuan-problems {
+  display: none;
+  margin: 0 0 6px;
+  padding: 6px 8px;
+  font-size: 0.9em;
+  color: var(--accent-red, #d33);
+  background: color-mix(in srgb, var(--accent-red, #d33) 10%, transparent);
+  border: 1px solid color-mix(in srgb, var(--accent-red, #d33) 35%, transparent);
+  border-radius: 4px;
 }
 
 /* What the template renders to. */
+.zsi-preview,
 .zotero-siyuan-preview {
   width: 100%;
   max-height: 14em;
   overflow: auto;
-  margin: 4px 0 0 0;
+  margin: 4px 0 0;
   padding: 8px;
   box-sizing: border-box;
   font-family: monospace;
   font-size: 0.9em;
-  line-height: 1.4;
+  line-height: 1.45;
   white-space: pre-wrap;
-  background: rgba(127, 127, 127, 0.08);
-  border: 1px solid rgba(127, 127, 127, 0.25);
+  user-select: text;
+  color: CanvasText;
+  background: color-mix(in srgb, CanvasText 7%, transparent);
+  border: 1px solid color-mix(in srgb, CanvasText 20%, transparent);
   border-radius: 4px;
 }
 
-/* The cheat sheet. */
-.zotero-siyuan-variables {
+/* ------------------------------------------------------- the cheat sheet */
+
+.zsi-variables {
   max-height: 16em;
   overflow: auto;
-  border: 1px solid rgba(127, 127, 127, 0.25);
-  border-radius: 4px;
   padding: 4px 8px;
   box-sizing: border-box;
+  border: 1px solid color-mix(in srgb, CanvasText 20%, transparent);
+  border-radius: 4px;
 }
 
-.zotero-siyuan-variables table {
+.zsi-variables table {
   width: 100%;
   border-collapse: collapse;
 }
 
-.zotero-siyuan-variables td {
+.zsi-variables td {
   padding: 2px 6px 2px 0;
   vertical-align: top;
   font-size: 0.9em;
 }
 
-.zotero-siyuan-variables .zotero-siyuan-variable-name {
+.zsi-variables .zotero-siyuan-variable-name {
+  width: 1%;
   font-family: monospace;
   white-space: nowrap;
-  width: 1%;
   opacity: 0.9;
 }
 
 /* Clicking a variable inserts it into the template. */
-.zotero-siyuan-variables tr[data-variable] {
+.zsi-variables tr[data-variable] {
   cursor: pointer;
 }
 
-.zotero-siyuan-variables tr[data-variable]:hover {
-  background: rgba(127, 127, 127, 0.16);
+.zsi-variables tr[data-variable]:hover {
+  background: color-mix(in srgb, CanvasText 12%, transparent);
 }
 
-.zotero-siyuan-variables tr[data-variable]:focus {
-  outline: 1px solid var(--accent-blue, #4a90d9);
+.zsi-variables tr[data-variable]:focus {
+  outline: 1px solid var(--accent-blue, #4072e5);
   outline-offset: -1px;
 }
 
 /* A variable the current template already uses. */
-.zotero-siyuan-variables .zotero-siyuan-variable-used .zotero-siyuan-variable-name {
+.zsi-variables .zotero-siyuan-variable-used .zotero-siyuan-variable-name {
   opacity: 1;
   font-weight: 600;
 }
 
-.zotero-siyuan-variables .zotero-siyuan-variable-group {
+.zsi-variables .zotero-siyuan-variable-group {
   padding-top: 8px;
   font-weight: 600;
   font-size: 0.85em;
   opacity: 0.65;
-  border-bottom: 1px solid rgba(127, 127, 127, 0.2);
+  border-bottom: 1px solid color-mix(in srgb, CanvasText 18%, transparent);
+}
+
+@media (max-width: 620px) {
+  .zsi-field,
+  .zsi-field-filter,
+  .zsi-field-conditional {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .zsi-field > .zsi-number {
+    margin-inline-start: 0;
+  }
 }

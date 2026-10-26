@@ -1,6 +1,9 @@
 button-label = 发送到思源笔记
 done = 已发送到思源笔记
 failed = 失败
+failed-title = 无法发送到思源笔记
+failed-unknown = 这条注释可能已经写入思源，但没有收到确认。请先查看今天的日记，再决定是否重发；它的图片已保留，不会损坏。
+toast-close = 关闭这条提示
 busy = 正在发送…
 busy-hint = 请等它发完。
 image-alt = 框选
@@ -8,12 +11,15 @@ sent-title = 已发送到思源笔记 — 点击打开对应的块
 toast-title = 已发送到思源笔记
 toast-open = 在思源中打开
 toast-batch-title = 已发送到思源笔记
+toast-batch-progress = 正在发送 %d/%d…
+toast-batch-sent = 已发送 %d 条
+toast-batch-failed = %d 条失败
+toast-batch-failed-title = 有部分内容没能发送
+toast-batch-retry = 重试失败的那几条
+toast-batch-more = 还有 %d 条
+toast-missing-annotation = 这条注释已不在文库中
 menu-send-one = 发送到思源笔记
 menu-send-many = 把 %d 条注释发送到思源笔记
-
-quote-title = 摘录
-comment-title = 批注
-empty-annotation = （空注释）
 
 label-author = 作者
 label-year = 年份

@@ -6,4 +6,4 @@
  * the version, and that copy can be a version behind the code that is
  * really running.
  */
-export const VERSION = "0.2.73";
+export const VERSION = "0.2.93";

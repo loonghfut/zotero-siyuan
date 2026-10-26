@@ -13,23 +13,34 @@
  *   siyuan workspace list   --format json
  *   siyuan workspace info   --format json
  *   siyuan notebook list    -w <workspace> --format json
- *   siyuan dailynote append --notebook <id> --file <path> -w <workspace> --format json
+ *   siyuan dailynote create --notebook <id> -w <workspace>
+ *   siyuan block append     --parent <document id> --file <path> -w <workspace> --format json
+ *
+ * The two write commands behave very differently, and the difference
+ * matters:
+ *
+ *   - `dailynote append` answers with the id of the **daily note document**
+ *     (a bare string, even with `--format json`);
+ *   - `block append` answers with JSON `{ "id": "<block id>" }` — the exact
+ *     block it created.
+ *
+ * So a send creates the daily note first and then appends to it: the block
+ * id then needs no guessing. `dailynote append` is kept as the fallback for
+ * a CLI that does not know `block append`.
  */
 
 import { tempFilePath, firstOf, homeDir, localAppDataDir, roamingAppDataDir } from "../utils/paths.js";
 
 /** How long a single CLI invocation may take before it is killed. */
-const COMMAND_TIMEOUT = 30000;
 
-/**
- * A SiYuan timestamp: local time as `YYYYMMDDHHMMSS`.
- *
- * The kernel stores block creation times in exactly this format, which is
- * what makes it possible to find the block a command has just created.
- *
- * @param {Date} date
- * @returns {String}
- */
+import { SiYuanProcess } from "./siyuan-process.js";
+
+// The search paths are asked about from outside (diagnostics, the checks), so
+// they stay reachable from the module the rest of the plugin imports.
+export { buildCandidatePaths } from "./siyuan-process.js";
+
+
+
 export function siyuanTimestamp(date = new Date()) {
   const pad = (n) => String(n).padStart(2, "0");
   return (
@@ -38,431 +49,16 @@ export function siyuanTimestamp(date = new Date()) {
   );
 }
 
-/**
- * The directories the siyuan CLI may live in, most likely first.
- *
- * Kept pure so it can be tested without a running Zotero. On Windows the
- * important detail is that desktop apps install into %LOCALAPPDATA%
- * (`AppData\Local`), while `Services.dirsvc.get("AppData")` is the *Roaming*
- * directory (`AppData\Roaming`) — using the wrong one yields paths that do
- * not exist.
- */
-export function buildCandidatePaths({
-  home = "",
-  localAppData = "",
-  roamingAppData = "",
-  programFiles = "",
-  isWin = false,
-  isMac = false,
-} = {}) {
-  const candidates = [];
-
-  if (isWin) {
-    const localBases = [];
-    if (localAppData) {
-      localBases.push(localAppData);
-    }
-    if (home) {
-      localBases.push(`${home}\\AppData\\Local`);
-    }
-    for (const base of localBases) {
-      candidates.push(
-        `${base}\\Programs\\SiYuan\\resources\\kernel\\siyuan.exe`,
-      );
-      candidates.push(`${base}\\SiYuan\\resources\\kernel\\siyuan.exe`);
-    }
-    if (roamingAppData) {
-      candidates.push(
-        `${roamingAppData}\\SiYuan\\resources\\kernel\\siyuan.exe`,
-      );
-    }
-    for (const base of [
-      programFiles,
-      "C:\\Program Files",
-      "C:\\Program Files (x86)",
-    ]) {
-      if (base) {
-        candidates.push(`${base}\\SiYuan\\resources\\kernel\\siyuan.exe`);
-      }
-    }
-  }
-  else if (isMac) {
-    candidates.push(
-      "/Applications/SiYuan.app/Contents/Resources/kernel/siyuan",
-    );
-    if (home) {
-      candidates.push(
-        `${home}/Applications/SiYuan.app/Contents/Resources/kernel/siyuan`,
-      );
-    }
-  }
-  else {
-    candidates.push(
-      "/usr/lib/siyuan/resources/kernel/siyuan",
-      "/opt/siyuan/resources/kernel/siyuan",
-    );
-    if (home) {
-      candidates.push(`${home}/.local/share/siyuan/kernel/siyuan`);
-    }
-  }
-
-  return candidates;
+export function isBlockID(value) {
+  return /^\d{14}-[0-9a-z]{7}$/i.test(String(value == null ? "" : value).trim());
 }
 
-export class SiYuanCLI {
-  constructor(options) {
-    this.executable = options.executable || ""; // explicit path, "" = auto-detect
-    this.workspace = options.workspace || ""; // "" = whatever the CLI defaults to
-  }
+export function blockCreatedAt(blockID) {
+  const text = String(blockID == null ? "" : blockID).trim();
+  return /^\d{14}-/.test(text) ? text.slice(0, 14) : "";
+}
 
-  /* ----------------------------------------------------------- process */
-
-  /**
-   * Run the siyuan CLI.
-   * @param {string[]} args
-   * @returns {Promise<{code: number, output: string}>}
-   */
-  async run(args) {
-    const command = await this.resolveExecutable();
-    const argv = args.slice();
-
-    if (this.workspace) {
-      argv.push("-w", this.workspace);
-    }
-
-    Zotero.debug(`ZoteroSiYuan: running ${command} ${argv.join(" ")}`);
-
-    // First choice: Gecko's Subprocess module. It reports the exit code and
-    // can merge stderr into stdout, which is what tells us why a command
-    // failed.
-    try {
-      const { Subprocess } = ChromeUtils.importESModule(
-        "resource://gre/modules/Subprocess.sys.mjs",
-      );
-      // stderr: "stdout" merges the error output into stdout, so a failing
-      // command still tells us what went wrong.
-      const proc = await Subprocess.call({
-        command,
-        arguments: argv,
-        stderr: "stdout",
-      });
-      const { out, exitCode } = await this.readProcess(proc);
-      return { code: exitCode, output: out };
-    }
-    catch (e) {
-      if (e && e.timedOut) {
-        // The command was started but never finished — retrying it through
-        // the fallback would only hang again.
-        throw e;
-      }
-      if (e && e.errorCode) {
-        throw new Error(
-          `Could not run the SiYuan CLI at "${command}": ${e.message}`,
-        );
-      }
-      // The Subprocess module is not reachable from this scope — fall back to
-      // Zotero's own helper, which the client itself uses (stdout only).
-      try {
-        const merged = await Zotero.Utilities.Internal.subprocess(command, argv);
-        return { code: merged ? 0 : 1, output: String(merged || "") };
-      }
-      catch (e2) {
-        throw new Error(
-          `Could not run the SiYuan CLI at "${command}": ${e2.message} ` +
-            `(first attempt: ${e && e.message ? e.message : e})`,
-        );
-      }
-    }
-  }
-
-  /**
-   * Read a running process to the end, with a timeout.
-   *
-   * A CLI that hangs (a locked workspace, a kernel that never answers) must
-   * not freeze the reader's click handler, so the whole read+wait is raced
-   * against a deadline.
-   *
-   * @param {Object} proc - a Gecko Subprocess handle
-   * @returns {Promise<{out: String, exitCode: Number}>}
-   */
-  async readProcess(proc) {
-    const work = (async () => {
-      let out = "";
-      let chunk;
-      while ((chunk = await proc.stdout.readString())) {
-        out += chunk;
-      }
-      // `proc.wait()` resolves with an *object* — `{ exitCode }` — not with
-      // the number itself. Taking it as a number would make every command
-      // look like it had failed.
-      const waited = await proc.wait();
-      const exitCode =
-        typeof waited === "number"
-          ? waited
-          : waited && typeof waited.exitCode === "number"
-            ? waited.exitCode
-            : -1;
-      return { out, exitCode };
-    })();
-
-    let timer = null;
-    const guard = new Promise((_, reject) => {
-      timer = setTimeout(() => {
-        try {
-          proc.kill();
-        }
-        catch (e) {
-          // already gone
-        }
-        const error = new Error(
-          `the siyuan CLI did not answer within ${COMMAND_TIMEOUT} ms`,
-        );
-        error.timedOut = true;
-        reject(error);
-      }, COMMAND_TIMEOUT);
-    });
-
-    try {
-      return await Promise.race([work, guard]);
-    }
-    finally {
-      clearTimeout(timer);
-    }
-  }
-
-  /**
-   * Run the CLI and parse its JSON output.
-   * @throws {Error} when the command fails
-   */
-  async runJSON(args) {
-    const result = await this.run(args.concat(["--format", "json"]));
-    const output = (result.output || "").trim();
-
-    if (result.code !== 0) {
-      throw new Error(this.describeFailure(output, args, result.code));
-    }
-    if (!output) {
-      throw new Error(
-        `The siyuan CLI returned no output for: siyuan ${args.join(" ")}`,
-      );
-    }
-    try {
-      return JSON.parse(output);
-    }
-    catch (e) {
-      throw new Error(
-        `Could not parse the siyuan CLI output: ${output.slice(0, 300)}`,
-      );
-    }
-  }
-
-  /**
-   * Run the CLI and return its raw answer.
-   *
-   * Some commands do not answer with JSON even when asked to — `dailynote
-   * append` answers with the id of the block it created — so they must not
-   * go through `runJSON()`.
-   *
-   * @throws {Error} when the command fails
-   */
-  async runRaw(args) {
-    const result = await this.run(args);
-    if (result.code !== 0) {
-      throw new Error(
-        this.describeFailure(result.output, args, result.code),
-      );
-    }
-    const output = (result.output || "").trim();
-    if (!output) {
-      // The fallback transport cannot tell a silent success from a failure,
-      // so an empty answer is treated as a failure.
-      throw new Error(
-        `The siyuan CLI returned no output for: siyuan ${args.join(" ")}`,
-      );
-    }
-    return output;
-  }
-
-  describeFailure(output, args, code) {
-    const text = (output || "").trim();
-    // The CLI prints "Error: …" first, then the usage block.
-    const lines = text.split("\n");
-    let message = "";
-    for (const line of lines) {
-      if (/^Error:/.test(line)) {
-        message = line.replace(/^Error:\s*/, "");
-        break;
-      }
-    }
-    if (!message) {
-      message = lines
-        .filter((l) => l && !/^\s{2,}/.test(l))
-        .slice(0, 2)
-        .join(" ");
-    }
-    if (!message) {
-      message = `exit code ${code}`;
-    }
-    return `siyuan ${args.join(" ")} failed: ${message}`;
-  }
-
-  /* -------------------------------------------------------- executable */
-
-  /**
-   * Windows uses backslashes; Gecko's executable check does not accept
-   * forward slashes, so a path typed as "C:/Users/…" is rejected as
-   * "not an executable" even though the file is there.
-   */
-  normalizePath(path) {
-    return Zotero.isWin ? path.replace(/\//g, "\\") : path;
-  }
-
-  /**
-   * Can this file actually be launched?
-   *
-   * Deliberately does not pre-check with IOUtils/PathUtils: Firefox's
-   * Subprocess already validates the file, and its verdict is the one that
-   * matters. So ask it directly — and keep the reason, because "could not
-   * find the CLI" without saying why is useless.
-   *
-   * @param {String} path
-   * @returns {Promise<{ok: Boolean, output: String, error: String}>}
-   */
-  async tryRun(path) {
-    const attempts = [];
-
-    try {
-      const { Subprocess } = ChromeUtils.importESModule(
-        "resource://gre/modules/Subprocess.sys.mjs",
-      );
-      const proc = await Subprocess.call({
-        command: path,
-        arguments: ["--version"],
-        stderr: "stdout",
-      });
-      const { out, exitCode } = await this.readProcess(proc);
-      return { ok: true, output: out.trim(), exitCode, error: "" };
-    }
-    catch (e) {
-      attempts.push(
-        `Subprocess.call: ${e && e.message ? e.message : String(e)}`,
-      );
-    }
-
-    // Zotero's own helper uses the same module, but it is imported in the
-    // client's scope — so it works even when the plugin's own import of the
-    // module does not.
-    try {
-      const out = await Zotero.Utilities.Internal.subprocess(path, [
-        "--version",
-      ]);
-      const text = String(out || "").trim();
-      if (text) {
-        return { ok: true, output: text, exitCode: 0, error: "" };
-      }
-      attempts.push("Zotero.Utilities.Internal.subprocess: no output");
-    }
-    catch (e) {
-      attempts.push(
-        `Zotero.Utilities.Internal.subprocess: ${
-          e && e.message ? e.message : String(e)
-        }`,
-      );
-    }
-
-    return { ok: false, output: "", exitCode: -1, error: attempts.join(" | ") };
-  }
-
-  /** Locate the siyuan CLI. */
-  async resolveExecutable() {
-    // Already found and verified — do not spawn `siyuan --version` again.
-    if (this._resolved && this.executable) {
-      return this.executable;
-    }
-
-    if (this.executable) {
-      const normalized = this.normalizePath(this.executable);
-      const result = await this.tryRun(normalized);
-      if (result.ok) {
-        this.executable = normalized;
-        this._resolved = true;
-        return normalized;
-      }
-      Zotero.debug(
-        `ZoteroSiYuan: the configured path "${this.executable}" cannot be launched (${result.error}); falling back to auto-detection`,
-      );
-      this.executable = "";
-    }
-
-    // On PATH? Subprocess.pathSearch resolves the name and validates it.
-    try {
-      const { Subprocess } = ChromeUtils.importESModule(
-        "resource://gre/modules/Subprocess.sys.mjs",
-      );
-      for (const name of ["siyuan", "siyuan.exe"]) {
-        try {
-          const found = await Subprocess.pathSearch(name);
-          if (found) {
-            this.executable = found;
-            this._resolved = true;
-            return found;
-          }
-        }
-        catch (e) {
-          // not on PATH under this name — try the next
-        }
-      }
-    }
-    catch (e) {
-      Zotero.debug(
-        `ZoteroSiYuan: the Subprocess module is not reachable here (${e.message})`,
-      );
-    }
-
-    // Common install locations.
-    const failures = [];
-    for (const candidate of this.candidatePaths()) {
-      const result = await this.tryRun(candidate);
-      if (result.ok) {
-        this.executable = candidate;
-        this._resolved = true;
-        return candidate;
-      }
-      failures.push(`${candidate} — ${result.error}`);
-    }
-
-    throw new Error(
-      "Could not find the siyuan CLI. It ships with SiYuan 3.7+ " +
-        "(Windows: %LOCALAPPDATA%\\Programs\\SiYuan\\resources\\kernel\\siyuan.exe). " +
-        "Leave the CLI path empty to auto-detect it, or set the full path to siyuan.exe." +
-        (failures.length ? "\nTried:\n  " + failures.join("\n  ") : ""),
-    );
-  }
-
-  candidatePaths() {
-    // Each base is looked up in several independent ways, because no single
-    // source is available in every scope a plugin may run in.
-    const home = homeDir();
-    // "AppData" is the *Roaming* directory; desktop apps install into
-    // %LOCALAPPDATA%. Getting this wrong points at a directory that does
-    // not exist, so probe both, and derive the local one from Home as well.
-    const localAppData = localAppDataDir();
-    const roamingAppData = roamingAppDataDir();
-    const programFiles = firstOf(
-      () => Services.env.get("ProgramFiles"),
-      () => Services.env.get("ProgramW6432"),
-    );
-
-    return buildCandidatePaths({
-      home,
-      localAppData,
-      roamingAppData,
-      programFiles,
-      isWin: Zotero.isWin,
-      isMac: Zotero.isMac,
-    });
-  }
-
+export class SiYuanCLI extends SiYuanProcess {
   /* --------------------------------------------------------- commands */
 
   async listWorkspaces() {
@@ -484,6 +80,7 @@ export class SiYuanCLI {
    * Resolve the notebook that should receive the daily note.
    * @param {string} wanted - notebook name or id from the preferences; empty = first usable one
    */
+
   async resolveNotebook(wanted) {
     const notebooks = await this.listNotebooks();
     if (!notebooks.length) {
@@ -513,32 +110,104 @@ export class SiYuanCLI {
   }
 
   /**
-   * Append Markdown to today's daily note, creating it if needed.
+   * Today's daily note, created when it does not exist yet.
    *
-   * Note the answer format: `siyuan dailynote append` prints the id of the
-   * block it created — a bare string, *not* JSON, even with
-   * `--format json`. So this must not go through `runJSON()`: parsing the
-   * block id as JSON fails, and the caller would believe the write failed
-   * although the block is already in the note.
+   * The command is idempotent — it answers with the id of the document of
+   * today either way — so it is safe to run before every send.
    *
    * @param {string} notebookID
-   * @param {string} markdown
-   * @returns {Promise<string>} the id of the block that was appended
+   * @returns {Promise<string>} the id of the daily note document
    */
-  async appendToDailyNote(notebookID, markdown) {
-    // The content goes through a temporary file: it contains newlines and
-    // Markdown punctuation that would be awkward as a command line argument.
+
+  async createDailyNote(notebookID) {
+    if (!notebookID) {
+      throw new Error("No SiYuan notebook was given.");
+    }
+    const output = await this.runRaw([
+      "dailynote",
+      "create",
+      "--notebook",
+      notebookID,
+    ]);
+    const documentID = String(output || "").trim();
+    if (!isBlockID(documentID)) {
+      throw new Error(
+        `The siyuan CLI did not answer with a document id: ${documentID.slice(0, 200)}`,
+      );
+    }
+    return documentID;
+  }
+
+  /**
+   * Append Markdown to a document and return the id of the block it made.
+   *
+   * `block append` is the only command that says which block it created:
+   * its JSON answer is `{ "id": "20261026173312-7zsvcqk" }`. For a
+   * multi-block Markdown the id is the first block of it — the one a
+   * "open in SiYuan" link should point at.
+   *
+   * @param {string} parentID - the document (or block) to append to
+   * @param {string} markdown
+   * @returns {Promise<string>} the id of the new block
+   */
+
+  async appendBlock(parentID, markdown) {
+    if (!isBlockID(parentID)) {
+      throw new Error(`"${parentID}" is not a block id`);
+    }
     const path = this.tempPath();
     await Zotero.File.putContentsAsync(path, markdown);
     try {
-      return await this.runRaw([
-        "dailynote",
-        "append",
-        "--notebook",
-        notebookID,
-        "--file",
-        path,
-      ]);
+      const result = await this.run(
+        [
+          "block",
+          "append",
+          "--parent",
+          parentID,
+          "--file",
+          path,
+          "--format",
+          "json",
+        ],
+        // A write: if the process hangs or its answer cannot be read, it
+        // may still have appended something.
+        { mutating: true },
+      );
+      if (result.code !== 0) {
+        // The command refused — nothing was written, so a fallback is safe.
+        throw new Error(
+          this.describeFailure(
+            result.output,
+            ["block", "append"],
+            result.code,
+          ),
+        );
+      }
+      const output = String(result.output || "").trim();
+      let data = null;
+      try {
+        data = JSON.parse(output);
+      }
+      catch (e) {
+        // The command may well have written the block; the answer is just
+        // not the shape expected. Falling back here would write it twice,
+        // so this is reported instead.
+        const error = new Error(
+          `siyuan block append answered with something other than JSON: ${output.slice(0, 200)}`,
+        );
+        error.written = true;
+        throw error;
+      }
+      const id = data && typeof data.id === "string" ? data.id.trim() : "";
+      if (!isBlockID(id)) {
+        const error = new Error(
+          "siyuan block append did not answer with a block id: " +
+            JSON.stringify(data).slice(0, 200),
+        );
+        error.written = true;
+        throw error;
+      }
+      return id;
     }
     finally {
       try {
@@ -550,26 +219,271 @@ export class SiYuanCLI {
     }
   }
 
-  tempPath() {
-    const name = `zotero-siyuan-${Date.now()}-${Math.floor(
-      Math.random() * 100000,
-    )}.md`;
-    return tempFilePath(name);
+  /**
+   * Today's daily note, created when it does not exist yet — and remembered.
+   *
+   * `dailynote create` is idempotent and answers with the id of today's
+   * document, but it is a process per call: without this, every send would
+   * start one, and so would the next send a second later. The document of a
+   * day does not move, so it is kept per notebook and per day.
+   *
+   * @param {string} notebookID
+   * @returns {Promise<string>} the id of the daily note document
+   */
+
+  async dailyNoteDocument(notebookID) {
+    const key = this.dailyNoteKey(notebookID);
+    if (this._dailyNote && this._dailyNote.key === key) {
+      return this._dailyNote.documentID;
+    }
+    const documentID = await this.createDailyNote(notebookID);
+    this._dailyNote = { key, documentID };
+    return documentID;
+  }
+
+  /**
+   * What the remembered daily note belongs to: the workspace, the notebook,
+   * and the local date — a note is "today's" until midnight.
+   *
+   * @param {string} notebookID
+   * @returns {string}
+   */
+
+  dailyNoteKey(notebookID) {
+    const now = new Date();
+    const pad = (n) => String(n).padStart(2, "0");
+    const day =
+      `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
+    return `${this.workspace}|${notebookID}|${day}`;
+  }
+
+  /**
+   * Append Markdown to today's daily note, creating it if needed.
+   *
+   * Answers with the ids of what was written, so the caller can link to the
+   * note and clean up after a test:
+   *
+   *   { documentID, blockID, blocks, blocksExact }
+   *
+   * The preferred way is `dailynote create` + `block append`, because
+   * `block append` says exactly which block it created. The older
+   * `dailynote append` only answers with the *document* id, so on that path
+   * the blocks have to be looked up by timestamp — which is ambiguous for
+   * two writes in the same second, and is why it is only the fallback.
+   *
+   * A send needs one thing from all of this: the block id. The list of the
+   * other blocks written at the same moment is only used by the self test,
+   * which has to take them all back — so it costs a process only when it is
+   * asked for. `blocksExact` says whether that list is trustworthy: it is
+   * only true when the document was read before the write as well, so the
+   * list is "what appeared while this write ran" rather than "what carries
+   * the same timestamp" — the second kind includes notes other writers made
+   * at the same moment.
+   *
+   * @param {string} notebookID
+   * @param {string} markdown
+   * @param {Object} [options]
+   * @param {Boolean} [options.collectBlocks] - also list the sibling blocks
+   * @returns {Promise<{documentID: String, blockID: String,
+   *   blocks: String[], blocksExact: Boolean}>}
+   */
+
+  async appendToDailyNote(notebookID, markdown, { collectBlocks = false } = {}) {
+    const since = siyuanTimestamp();
+    try {
+      // Was the document remembered from an earlier send? Then a failure
+      // below may mean it is gone (deleted in SiYuan, or the day turned
+      // over) — and recreating it is worth one attempt.
+      const remembered =
+        !!this._dailyNote && this._dailyNote.key === this.dailyNoteKey(notebookID);
+      let documentID = await this.dailyNoteDocument(notebookID);
+      // The caller that deletes what was written needs to know which
+      // blocks are *new*. A timestamp alone cannot say that: a note
+      // written by the user in the same second carries the same one. So
+      // the document is read before the write as well, and only the
+      // difference counts.
+      let before = collectBlocks
+        ? await this.findBlocksSince(documentID, since).catch(() => null)
+        : null;
+      let blockID = "";
+      try {
+        blockID = await this.appendBlock(documentID, markdown);
+      }
+      catch (e) {
+        if (
+          !remembered ||
+          (e && (e.timedOut || e.written || e.writeState === "unknown"))
+        ) {
+          throw e;
+        }
+        // The remembered note is not there any more. `appendBlock` says
+        // when it may have written, so reaching this point means it wrote
+        // nothing — creating the note again cannot double anything.
+        this._dailyNote = null;
+        documentID = await this.dailyNoteDocument(notebookID);
+        // The snapshot belongs to the *old* document; the new one needs its
+        // own, or every block of it would look like it was just written.
+        if (collectBlocks) {
+          before = await this.findBlocksSince(documentID, since)
+            .catch(() => null);
+        }
+        blockID = await this.appendBlock(documentID, markdown);
+      }
+      // Every top-level block of the same append shares its creation
+      // second. They are collected for the self test, which has to take
+      // them all back again; the link itself points at the first one.
+      const blocks = collectBlocks
+        ? await this.newBlocksSince(documentID, since, before)
+        : [];
+      return {
+        documentID,
+        blockID,
+        blocks: blocks.length ? blocks : [blockID],
+        // True when the list above is "everything that appeared while this
+        // write ran", not "everything with the same timestamp".
+        blocksExact: collectBlocks ? !!before : false,
+      };
+    }
+    catch (e) {
+      if (e && (e.timedOut || e.written || e.writeState === "unknown")) {
+        // Either the command hung, or it may already have written — a
+        // fallback would then append the same note twice.
+        throw e;
+      }
+      // Whatever was remembered is of no use now.
+      this._dailyNote = null;
+      Zotero.debug(
+        `ZoteroSiYuan: "block append" is not available (${e.message}); ` +
+          "falling back to \"dailynote append\"",
+      );
+    }
+
+    // The fallback: one command, but it only answers with the document id.
+    // A caller that has to delete its own blocks needs the document before
+    // the write, so the daily note is resolved first in that case only.
+    let knownDocumentID = "";
+    let before = null;
+    if (collectBlocks) {
+      try {
+        knownDocumentID = await this.dailyNoteDocument(notebookID);
+        before = await this.findBlocksSince(knownDocumentID, since);
+      }
+      catch (e) {
+        knownDocumentID = "";
+        before = null;
+      }
+    }
+    const path = this.tempPath();
+    await Zotero.File.putContentsAsync(path, markdown);
+    let documentID = "";
+    try {
+      documentID = String(
+        await this.runRaw(
+          [
+            "dailynote",
+            "append",
+            "--notebook",
+            notebookID,
+            "--file",
+            path,
+          ],
+          // A write, like `block append` above.
+          { mutating: true },
+        ),
+      ).trim();
+    }
+    finally {
+      try {
+        await IOUtils.remove(path, { ignoreAbsent: true });
+      }
+      catch (e) {
+        // ignore
+      }
+    }
+
+    // Only a snapshot of the *same* document can be trusted.
+    const comparable = !!before && knownDocumentID === documentID;
+    const blocks = documentID
+      ? await this.newBlocksSince(
+        documentID,
+        since,
+        comparable ? before : null,
+      )
+      : [];
+    return {
+      documentID,
+      blockID: blocks[0] || "",
+      blocks,
+      blocksExact: comparable,
+    };
+  }
+
+  /**
+   * The blocks that appeared in a document while a write ran.
+   *
+   * @param {String} documentID
+   * @param {String} since - a SiYuan timestamp, taken before the write
+   * @param {String[]|null} before - the blocks that already existed then;
+   *   null when no snapshot could be taken
+   * @returns {Promise<String[]>} oldest first
+   */
+
+  async newBlocksSince(documentID, since, before) {
+    let after = [];
+    try {
+      after = await this.findBlocksSince(documentID, since);
+    }
+    catch (e) {
+      Zotero.debug(
+        `ZoteroSiYuan: could not list the blocks of the new note: ${e.message}`,
+      );
+      return [];
+    }
+    if (!before) {
+      return after;
+    }
+    const known = new Set(before);
+    return after.filter((id) => !known.has(id));
+  }
+
+  /**
+   * Which of these blocks still exist.
+   *
+   * The self test deletes what it wrote and then asks this — a delete that
+   * did not take must not be reported as a clean run.
+   *
+   * @param {String[]} blockIDs
+   * @returns {Promise<String[]>} the ones that are still there
+   */
+
+  async findExistingBlocks(blockIDs) {
+    const ids = (blockIDs || []).filter((id) => isBlockID(id));
+    if (!ids.length) {
+      return [];
+    }
+    const list = ids.map((id) => `'${id}'`).join(", ");
+    const rows = await this.runJSON([
+      "sql",
+      `SELECT id FROM blocks WHERE id IN (${list})`,
+    ]);
+    if (!Array.isArray(rows)) {
+      return [];
+    }
+    return rows.map((row) => row.id).filter(Boolean);
   }
 
   /**
    * The top-level blocks that were created after a given moment.
    *
-   * `dailynote append` answers with the id of the *daily note document*,
-   * not of the blocks it created — so the blocks themselves are looked up in
-   * the workspace's own database. A template usually produces several
-   * (a callout, a comment, a metadata paragraph), and all of them are
-   * returned.
+   * Only used to tell what a write left behind. On its own it cannot
+   * separate two writes in the same second — that is why `newBlocksSince`
+   * compares two of these answers.
    *
    * @param {String} documentID - the daily note document
    * @param {String} since - a SiYuan timestamp
    * @returns {Promise<String[]>} the block ids, oldest first
    */
+
   async findBlocksSince(documentID, since) {
     if (!/^[0-9A-Za-z-]+$/.test(String(documentID))) {
       throw new Error(`"${documentID}" is not a block id`);
@@ -593,12 +507,16 @@ export class SiYuanCLI {
     if (!/^[0-9A-Za-z-]+$/.test(String(blockID))) {
       throw new Error(`"${blockID}" is not a block id`);
     }
-    return await this.runRaw(["block", "delete", "--id", blockID]);
+    // A write as well: a delete that timed out may already have happened.
+    return await this.runRaw(["block", "delete", "--id", blockID], {
+      mutating: true,
+    });
   }
 
   /**
    * Check that the CLI works and report what it sees.
    */
+
   async diagnose() {
     const report = {
       ok: false,

@@ -46,19 +46,56 @@ function appLocale() {
 }
 
 /**
- * Does the plugin ship this locale?
+ * The file path of a message file, when it has one.
+ *
+ * An unpacked install is a `file:` URI and can be asked about directly. An
+ * install inside the XPI is a `jar:` URI, which is not a file at all — there
+ * is nothing to check there, and "" says so.
+ *
  * @param {String} locale
- * @returns {Boolean}
+ * @param {String} file
+ * @returns {String} the path, or "" when it cannot be checked
  */
-function localeExists(locale) {
+function localeFilePath(locale, file) {
 	try {
-		return FTL_FILES.every((file) =>
-			IOUtils.exists(`${_globalThis.rootURI}locale/${locale}/${file}`),
+		const uri = Services.io.newURI(
+			`${_globalThis.rootURI}locale/${locale}/${file}`,
 		);
+		return uri.QueryInterface(Components.interfaces.nsIFileURL).file.path;
 	}
 	catch (e) {
-		return false;
+		return "";
 	}
+}
+
+/**
+ * Does the plugin ship this locale?
+ *
+ * `IOUtils.exists()` answers with a **promise**, and a promise is always
+ * truthy — a check written as `files.every((f) => IOUtils.exists(f))` is
+ * therefore always true. It is awaited here. A path that cannot be
+ * checked counts as present: guessing "absent" would take the user's
+ * language away from them.
+ *
+ * @param {String} locale
+ * @returns {Promise<Boolean>}
+ */
+async function localeExists(locale) {
+	for (const file of FTL_FILES) {
+		const path = localeFilePath(locale, file);
+		if (!path) {
+			return true;
+		}
+		try {
+			if (!(await IOUtils.exists(path))) {
+				return false;
+			}
+		}
+		catch (e) {
+			return true;
+		}
+	}
+	return true;
 }
 
 /**
@@ -81,7 +118,16 @@ function openBundle(locale) {
 	}
 }
 
-export function initLocale() {
+/**
+ * Open the message bundles.
+ *
+ * Asynchronous because deciding *which* locales to open means looking at
+ * the files that were really packaged — see `localeExists`. Startup awaits
+ * it before anything can draw a button with a label in it.
+ *
+ * @returns {Promise<void>}
+ */
+export async function initLocale() {
 	bundles.length = 0;
 
 	const wanted = appLocale();
@@ -92,7 +138,10 @@ export function initLocale() {
 	for (const locale of locales) {
 		// Only ask for a locale the plugin really ships — otherwise the
 		// fallback answers everything and the language is simply English.
-		if (locale !== FALLBACK_LOCALE && !localeExists(locale)) {
+		if (locale !== FALLBACK_LOCALE && !(await localeExists(locale))) {
+			Zotero.debug(
+				`ZoteroSiYuan: the interface is ${wanted}, which the plugin does not ship — using ${FALLBACK_LOCALE}`,
+			);
 			continue;
 		}
 		const bundle = openBundle(locale);

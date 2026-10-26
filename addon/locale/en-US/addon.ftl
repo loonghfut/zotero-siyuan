@@ -1,6 +1,9 @@
 button-label = Send to SiYuan
 done = Sent to SiYuan
 failed = Failed
+failed-title = Could not send to SiYuan
+failed-unknown = The note may already be in SiYuan, but no answer came back. Check today's daily note before sending it again — its picture was kept, so nothing is broken.
+toast-close = Dismiss this message
 busy = Sending…
 busy-hint = Wait for it to finish.
 image-alt = Area selection
@@ -8,12 +11,15 @@ sent-title = Already sent to SiYuan — click to open that block
 toast-title = Sent to SiYuan
 toast-open = Open in SiYuan
 toast-batch-title = Sent to SiYuan
+toast-batch-progress = Sending %d/%d…
+toast-batch-sent = %d sent
+toast-batch-failed = %d failed
+toast-batch-failed-title = Not everything was sent
+toast-batch-retry = Retry the failed ones
+toast-batch-more = …and %d more
+toast-missing-annotation = the annotation is no longer in the library
 menu-send-one = Send to SiYuan
 menu-send-many = Send %d annotations to SiYuan
-
-quote-title = Quote
-comment-title = Comment
-empty-annotation = (empty annotation)
 
 label-author = Author
 label-year = Year

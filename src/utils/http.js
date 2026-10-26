@@ -27,21 +27,3 @@ export async function responseText(response) {
 	}
 	return "";
 }
-
-/**
- * The status code of a response, if it has one.
- * @param {Object} response
- * @returns {Number}
- */
-export function responseStatus(response) {
-	if (!response) {
-		return 0;
-	}
-	if (typeof response.status === "number") {
-		return response.status;
-	}
-	if (typeof response.responseStatus === "number") {
-		return response.responseStatus;
-	}
-	return 0;
-}

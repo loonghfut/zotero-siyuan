@@ -26,8 +26,12 @@ async function startup({ id, version, resourceURI, rootURI }, reason) {
   /**
    * Global variables for plugin code. `_globalThis` is the global root of the
    * plugin sandbox; everything assigned to it is globally accessible.
+   *
+   * The version of the plugin is put there as well: it is the one thing that
+   * says which code is really running — and after replacing the XPI, that is
+   * not always the code one expects.
    */
-  const ctx = { rootURI };
+  const ctx = { rootURI, version };
   ctx._globalThis = ctx;
 
   Services.scriptloader.loadSubScript(

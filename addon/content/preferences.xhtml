@@ -1,165 +1,235 @@
 <linkset>
   <html:link rel="localization" href="__addonRef__-preferences.ftl" />
 </linkset>
-<groupbox>
-  <label><html:h2 data-l10n-id="pref-title"></html:h2></label>
+<vbox class="main-section">
+  <groupbox>
+    <label><html:h2 data-l10n-id="pref-title"></html:h2></label>
 
-  <hbox>
-    <html:label
-      for="zotero-prefpane-__addonRef__-cliPath"
-      data-l10n-id="pref-cliPath"
-    ></html:label>
-    <html:input
-      type="text"
-      id="zotero-prefpane-__addonRef__-cliPath"
-      preference="cliPath"
-    ></html:input>
-  </hbox>
+    <html:div class="zsi-field">
+      <html:label
+        class="zsi-label"
+        for="zotero-prefpane-zoteroSiYuan-cliPath"
+        data-l10n-id="pref-cliPath"
+      ></html:label>
+      <html:input
+        class="zsi-input"
+        type="text"
+        id="zotero-prefpane-zoteroSiYuan-cliPath"
+        preference="cliPath"
+      ></html:input>
+    </html:div>
 
-  <hbox>
-    <html:label
-      for="zotero-prefpane-__addonRef__-workspace"
-      data-l10n-id="pref-workspace"
-    ></html:label>
-    <html:input
-      type="text"
-      id="zotero-prefpane-__addonRef__-workspace"
-      preference="workspace"
-    ></html:input>
-  </hbox>
+    <html:div class="zsi-field">
+      <html:label
+        class="zsi-label"
+        for="zotero-prefpane-zoteroSiYuan-workspace"
+        data-l10n-id="pref-workspace"
+      ></html:label>
+      <html:input
+        class="zsi-input"
+        type="text"
+        id="zotero-prefpane-zoteroSiYuan-workspace"
+        preference="workspace"
+      ></html:input>
+    </html:div>
 
-  <hbox>
-    <html:label
-      for="zotero-prefpane-__addonRef__-notebook"
-      data-l10n-id="pref-notebook"
-    ></html:label>
-    <html:input
-      type="text"
-      id="zotero-prefpane-__addonRef__-notebook"
-      preference="notebook"
-    ></html:input>
-  </hbox>
+    <html:div class="zsi-field">
+      <html:label
+        class="zsi-label"
+        for="zotero-prefpane-zoteroSiYuan-notebook"
+        data-l10n-id="pref-notebook"
+      ></html:label>
+      <html:input
+        class="zsi-input"
+        type="text"
+        id="zotero-prefpane-zoteroSiYuan-notebook"
+        preference="notebook"
+      ></html:input>
+    </html:div>
 
-  <hbox>
-    <html:button
-      id="zotero-prefpane-__addonRef__-test"
-      data-l10n-id="pref-test"
-    ></html:button>
-    <html:span
-      id="zotero-prefpane-__addonRef__-result"
-      class="zotero-siyuan-result"
-    ></html:span>
-  </hbox>
+    <html:div class="zsi-actions">
+      <html:button
+        class="zsi-button"
+        id="zotero-prefpane-zoteroSiYuan-test"
+        data-l10n-id="pref-test"
+      ></html:button>
+      <html:button
+        class="zsi-button"
+        id="zotero-prefpane-zoteroSiYuan-selftest"
+        data-l10n-id="pref-selftest"
+      ></html:button>
+      <html:button
+        class="zsi-button"
+        id="zotero-prefpane-zoteroSiYuan-rescan"
+        data-l10n-id="pref-rescan"
+      ></html:button>
+    </html:div>
 
-  <hbox>
-    <html:button
-      id="zotero-prefpane-__addonRef__-selftest"
-      data-l10n-id="pref-selftest"
-    ></html:button>
-    <html:button
-      id="zotero-prefpane-__addonRef__-checkpictures"
-      data-l10n-id="pref-checkpictures"
-    ></html:button>
-    <html:button
-      id="zotero-prefpane-__addonRef__-rescan"
-      data-l10n-id="pref-rescan"
-    ></html:button>
-  </hbox>
+    <html:p
+      class="zsi-result"
+      id="zotero-prefpane-zoteroSiYuan-result"
+      role="status"
+      aria-live="polite"
+    ></html:p>
 
-  <html:p class="zotero-siyuan-hint" data-l10n-id="pref-hint"></html:p>
-</groupbox>
+    <html:p class="zsi-hint" data-l10n-id="pref-hint"></html:p>
+  </groupbox>
 
-<groupbox>
-  <label><html:h2 data-l10n-id="pref-template-title"></html:h2></label>
+  <groupbox>
+    <label><html:h2 data-l10n-id="pref-picture-title"></html:h2></label>
 
-  <hbox class="zotero-siyuan-template-head">
-    <html:label data-l10n-id="pref-template-preset"></html:label>
-    <html:select
-      id="zotero-prefpane-__addonRef__-template-preset"
-    ></html:select>
-    <html:button
-      id="zotero-prefpane-__addonRef__-template-preset-apply"
-      data-l10n-id="pref-template-preset-apply"
-    ></html:button>
-  </hbox>
+    <html:div class="zsi-field zsi-field-check">
+      <html:input
+        class="zsi-checkbox"
+        id="zotero-prefpane-zoteroSiYuan-image-compress"
+        type="checkbox"
+      ></html:input>
+      <html:label
+        for="zotero-prefpane-zoteroSiYuan-image-compress"
+        data-l10n-id="pref-image-compress"
+      ></html:label>
+    </html:div>
 
-  <hbox class="zotero-siyuan-template-head">
-    <html:label data-l10n-id="pref-template"></html:label>
-    <html:button
-      id="zotero-prefpane-__addonRef__-reset-template"
-      data-l10n-id="pref-template-reset"
-    ></html:button>
-    <html:span
-      id="zotero-prefpane-__addonRef__-template-status"
-      class="zotero-siyuan-status"
-    ></html:span>
-  </hbox>
+    <html:div class="zsi-field">
+      <html:label
+        class="zsi-label"
+        for="zotero-prefpane-zoteroSiYuan-image-quality"
+        data-l10n-id="pref-image-quality"
+      ></html:label>
+      <!--
+        An HTML range input, not the XUL <slider> an earlier version used:
+        the XUL slider no longer exists in the Firefox Zotero is built on,
+        so that control simply did not appear.
+      -->
+      <html:input
+        class="zsi-range"
+        id="zotero-prefpane-zoteroSiYuan-image-quality-range"
+        type="range"
+        min="10"
+        max="100"
+        step="1"
+      ></html:input>
+      <html:input
+        class="zsi-number"
+        id="zotero-prefpane-zoteroSiYuan-image-quality"
+        type="number"
+        min="10"
+        max="100"
+        step="1"
+      ></html:input>
+    </html:div>
 
-  <html:div
-    id="zotero-prefpane-__addonRef__-template-problems"
-    class="zotero-siyuan-problems"
-  ></html:div>
+    <html:div class="zsi-actions">
+      <html:button
+        class="zsi-button"
+        id="zotero-prefpane-zoteroSiYuan-checkpictures"
+        data-l10n-id="pref-checkpictures"
+      ></html:button>
+    </html:div>
 
-  <html:textarea
-    id="zotero-prefpane-__addonRef__-template"
-    rows="16"
-    spellcheck="false"
-  ></html:textarea>
+    <html:p class="zsi-hint" data-l10n-id="pref-picture-hint"></html:p>
+  </groupbox>
 
-  <html:label data-l10n-id="pref-preview"></html:label>
-  <html:pre
-    id="zotero-prefpane-__addonRef__-preview"
-    class="zotero-siyuan-preview"
-  ></html:pre>
+  <groupbox>
+    <label><html:h2 data-l10n-id="pref-template-title"></html:h2></label>
 
-  <hbox class="zotero-siyuan-template-head">
-    <html:label data-l10n-id="pref-variables"></html:label>
-    <html:input
-      id="zotero-prefpane-__addonRef__-variable-filter"
-      type="search"
-      data-l10n-id="pref-variables-filter"
-    ></html:input>
-    <html:label
-      for="zotero-prefpane-__addonRef__-variable-only-used"
-      data-l10n-id="pref-variables-only-used"
-    ></html:label>
-    <html:input
-      id="zotero-prefpane-__addonRef__-variable-only-used"
-      type="checkbox"
-    ></html:input>
-  </hbox>
-  <html:div
-    id="zotero-prefpane-__addonRef__-variables"
-    class="zotero-siyuan-variables"
-  ></html:div>
+    <html:div class="zsi-field">
+      <html:label
+        class="zsi-label"
+        for="zotero-prefpane-zoteroSiYuan-template-preset"
+        data-l10n-id="pref-template-preset"
+      ></html:label>
+      <html:select
+        class="zsi-select"
+        id="zotero-prefpane-zoteroSiYuan-template-preset"
+      ></html:select>
+      <html:button
+        class="zsi-button"
+        id="zotero-prefpane-zoteroSiYuan-template-preset-apply"
+        data-l10n-id="pref-template-preset-apply"
+      ></html:button>
+    </html:div>
 
-  <hbox class="zotero-siyuan-template-head">
-    <html:label data-l10n-id="pref-conditionals"></html:label>
-    <html:select
-      id="zotero-prefpane-zoteroSiYuan-conditional-variable"
-    ></html:select>
-    <html:button
-      id="zotero-prefpane-zoteroSiYuan-conditional-if"
-      data-l10n-id="pref-conditionals-if"
-    ></html:button>
-    <html:button
-      id="zotero-prefpane-zoteroSiYuan-conditional-else"
-      data-l10n-id="pref-conditionals-else"
-    ></html:button>
-    <html:button
-      id="zotero-prefpane-zoteroSiYuan-conditional-end"
-      data-l10n-id="pref-conditionals-end"
-    ></html:button>
-  </hbox>
-  <html:p
-    class="zotero-siyuan-hint"
-    data-l10n-id="pref-conditionals-hint"
-  ></html:p>
+    <html:div class="zsi-field">
+      <html:label class="zsi-label" data-l10n-id="pref-template"></html:label>
+      <html:button
+        class="zsi-button"
+        id="zotero-prefpane-zoteroSiYuan-reset-template"
+        data-l10n-id="pref-template-reset"
+      ></html:button>
+      <html:span
+        class="zsi-status"
+        id="zotero-prefpane-zoteroSiYuan-template-status"
+        role="status"
+        aria-live="polite"
+      ></html:span>
+    </html:div>
 
-  <html:p
-    class="zotero-siyuan-hint"
-    data-l10n-id="pref-variables-hint"
-  ></html:p>
+    <html:div
+      class="zsi-problems"
+      id="zotero-prefpane-zoteroSiYuan-template-problems"
+    ></html:div>
 
-  <html:p class="zotero-siyuan-hint" data-l10n-id="pref-template-hint"></html:p>
-</groupbox>
+    <html:textarea
+      class="zsi-textarea"
+      id="zotero-prefpane-zoteroSiYuan-template"
+      rows="16"
+      spellcheck="false"
+    ></html:textarea>
+
+    <html:label class="zsi-subhead" data-l10n-id="pref-preview"></html:label>
+    <html:pre
+      class="zsi-preview"
+      id="zotero-prefpane-zoteroSiYuan-preview"
+    ></html:pre>
+
+    <html:div class="zsi-field zsi-field-filter">
+      <html:label class="zsi-label" data-l10n-id="pref-variables"></html:label>
+      <html:input
+        class="zsi-input"
+        id="zotero-prefpane-zoteroSiYuan-variable-filter"
+        type="search"
+      ></html:input>
+      <html:label class="zsi-inline-check">
+        <html:input
+          class="zsi-checkbox"
+          id="zotero-prefpane-zoteroSiYuan-variable-only-used"
+          type="checkbox"
+        ></html:input>
+        <html:span data-l10n-id="pref-variables-only-used"></html:span>
+      </html:label>
+    </html:div>
+
+    <html:div
+      class="zsi-variables"
+      id="zotero-prefpane-zoteroSiYuan-variables"
+    ></html:div>
+
+    <html:div class="zsi-field zsi-field-conditional">
+      <html:label class="zsi-label" data-l10n-id="pref-conditionals"></html:label>
+      <html:select
+        class="zsi-select"
+        id="zotero-prefpane-zoteroSiYuan-conditional-variable"
+      ></html:select>
+      <html:button
+        class="zsi-button"
+        id="zotero-prefpane-zoteroSiYuan-conditional-if"
+        data-l10n-id="pref-conditionals-if"
+      ></html:button>
+      <html:button
+        class="zsi-button"
+        id="zotero-prefpane-zoteroSiYuan-conditional-else"
+        data-l10n-id="pref-conditionals-else"
+      ></html:button>
+      <html:button
+        class="zsi-button"
+        id="zotero-prefpane-zoteroSiYuan-conditional-end"
+        data-l10n-id="pref-conditionals-end"
+      ></html:button>
+    </html:div>
+
+    <html:p class="zsi-hint" data-l10n-id="pref-conditionals-hint"></html:p>
+    <html:p class="zsi-hint" data-l10n-id="pref-variables-hint"></html:p>
+    <html:p class="zsi-hint" data-l10n-id="pref-template-hint"></html:p>
+  </groupbox>
+</vbox>
