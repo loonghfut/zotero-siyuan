@@ -289,6 +289,37 @@ export function pictureAssetNames(markdown) {
 }
 
 /**
+ * The pictures that may be taken back.
+ *
+ * A picture that was in the folder before is not ours, and a picture that
+ * a note refers to belongs to that note — neither of them may go. What is
+ * left showed up on its own and is referred to by nobody: litter.
+ *
+ * The decision is kept here, apart from the file system, so it can be
+ * tried out without a workspace.
+ *
+ * @param {Set<String>} before - the pictures the folder held before
+ * @param {Set<String>} after - the pictures it holds now
+ * @param {Set<String>} referenced - the pictures a note refers to
+ * @returns {String[]} the names that may go
+ */
+export function strayPictureNames(before, after, referenced) {
+	const names = [];
+	if (!before || !after || !referenced) {
+		// Without the reading from before it cannot be told what is new,
+		// and without the reading of the notes it cannot be told what
+		// belongs to a note. Nothing is taken back then.
+		return names;
+	}
+	for (const name of after) {
+		if (!before.has(name) && !referenced.has(name)) {
+			names.push(name);
+		}
+	}
+	return names;
+}
+
+/**
  * A file name for a picture that is unique but still readable.
  *
  * @param {String} annotationKey - the annotation's key

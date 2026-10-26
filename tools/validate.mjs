@@ -763,6 +763,25 @@ section("Area-selection pictures");
         selfTest.includes("removeExportedPictures") &&
         /IOUtils\.remove\(/.test(selfTest),
     );
+    check(
+      "the self test looks at the assets folder before and after",
+      // A picture that a failed render left behind is named by nobody:
+      // only the difference between the folder before and after the run
+      // finds it.
+      selfTest.includes("picturesBefore = await picturesInWorkspace()") &&
+        selfTest.includes("removeStrayPictures(picturesBefore") &&
+        selfTest.includes("strayPictureNames("),
+    );
+    check(
+      "a picture that a note refers to is kept",
+      // The kernel knows every picture a note links to — that is what
+      // tells a stray picture from one that belongs to a note the user
+      // sent while the self test was running. The answer of the kernel
+      // has to reach the decision, not merely be fetched.
+      /const registered = await registeredPictures\(\);/.test(selfTest) &&
+        /const referenced = new Set\(\[\.\.\.registered/.test(selfTest) &&
+        selfTest.includes("FROM assets WHERE path LIKE '%zotero-siyuan-%'"),
+    );
   }
 
   // --- the picture itself ------------------------------------------------
@@ -775,6 +794,7 @@ section("Area-selection pictures");
     pictureAssetNames,
     pictureFile,
     removePicture,
+    strayPictureNames,
   } = await import(
     new URL("../src/modules/siyuan-image.js", import.meta.url).href
   );
@@ -797,6 +817,48 @@ section("Area-selection pictures");
     /^zotero-siyuan-ABCD1234-\d{14}$/.test(pictureName("ABCD1234")),
     pictureName("ABCD1234"),
   );
+
+  // --- which pictures may go ---------------------------------------------
+  {
+    const before = new Set(["zotero-siyuan-OLD-1.png"]);
+    const after = new Set([
+      "zotero-siyuan-OLD-1.png",
+      "zotero-siyuan-NEW-2.png",
+      "zotero-siyuan-NEW-3.png",
+    ]);
+    const referenced = new Set(["zotero-siyuan-NEW-3.png"]);
+    check(
+      "a picture that was already there is not stray",
+      !strayPictureNames(before, after, referenced).includes(
+        "zotero-siyuan-OLD-1.png",
+      ),
+    );
+    check(
+      "a picture that a note refers to is not stray",
+      !strayPictureNames(before, after, referenced).includes(
+        "zotero-siyuan-NEW-3.png",
+      ),
+    );
+    check(
+      "a picture that nobody refers to is stray",
+      strayPictureNames(before, after, referenced).join() ===
+        "zotero-siyuan-NEW-2.png",
+      strayPictureNames(before, after, referenced).join(),
+    );
+    check(
+      "without a reading from before, nothing is taken back",
+      // The folder could not be read at the start — then every picture
+      // would look new, and the user's own pictures would go.
+      strayPictureNames(null, after, referenced).length === 0 &&
+        strayPictureNames(before, null, referenced).length === 0,
+    );
+    check(
+      "without a reading of the notes, nothing is taken back",
+      // The kernel did not answer — then it is not known which picture
+      // belongs to a note.
+      strayPictureNames(before, after, null).length === 0,
+    );
+  }
 
   // --- the picture really lands in the workspace -------------------------
   // Outside Zotero there is no `IOUtils`, so a small stand-in is put in
@@ -1167,6 +1229,43 @@ section("Regression guards");
     );
   }
 
+  // --- a variable without a value must not leave a line behind ----------
+  {
+    const { renderTemplate: render } = await import(
+      new URL("../src/modules/template.js", import.meta.url).href
+    );
+    const empty = render("{{a}}\n{{b}}\n{{c}}", { a: "", b: "", c: "C" });
+    check(
+      "an empty variable does not leave a line behind",
+      empty.text === "C",
+      JSON.stringify(empty.text),
+    );
+    const mixed = render("{{a}}\n{{b}}\n{{c}}", { a: "A", b: "", c: "C" });
+    check(
+      "only the empty variable's line goes",
+      mixed.text === "A\nC",
+      JSON.stringify(mixed.text),
+    );
+    const withText = render("作者：{{a}}\n{{b}}", { a: "", b: "B" });
+    check(
+      "a line with text of its own stays",
+      withText.text === "作者：\nB",
+      JSON.stringify(withText.text),
+    );
+    const skipped = render("{{#if a}}X{{/if}}\n{{b}}", { a: "", b: "B" });
+    check(
+      "a conditional that was not taken leaves no line behind",
+      skipped.text === "B",
+      JSON.stringify(skipped.text),
+    );
+    const blank = render("{{a}}\n\n{{b}}", { a: "", b: "B" });
+    check(
+      "a blank line of the template itself stays",
+      blank.text === "\nB",
+      JSON.stringify(blank.text),
+    );
+  }
+
   // --- a scan must not throw away what was added while it ran ----------
   {
     const { SiYuanIndex } = await import(
@@ -1234,7 +1333,7 @@ section("Regression guards");
 
   // --- a title with brackets must not break the link -------------------
   {
-    const { escapeInline } = await import(
+    const { escapeInline, toCalloutBody } = await import(
       new URL("../src/modules/metadata.js", import.meta.url).href
     );
     const escaped = escapeInline("A [weird] (title)");
@@ -1242,6 +1341,18 @@ section("Regression guards");
       "a square bracket in a title is escaped",
       escaped.includes("\\[") && escaped.includes("\\]"),
       escaped,
+    );
+    check(
+      "an empty callout is empty, not a lone quote mark",
+      // A ">" with nothing behind it takes up a line in the note without
+      // saying anything.
+      toCalloutBody("") === "" && toCalloutBody("   ") === "",
+      JSON.stringify(toCalloutBody("")),
+    );
+    check(
+      "a callout still quotes its text",
+      toCalloutBody("hello") === "> hello",
+      JSON.stringify(toCalloutBody("hello")),
     );
   }
 }

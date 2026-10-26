@@ -22,7 +22,11 @@
 
 import { tempFilePath } from "../utils/paths.js";
 import { clearLegacyTags } from "./siyuan-index.js";
-import { pictureAssetNames, removePicture } from "./siyuan-image.js";
+import {
+	pictureAssetNames,
+	removePicture,
+	strayPictureNames,
+} from "./siyuan-image.js";
 import {
 	findHandlerExecutable,
 	protocolHandlerCommand,
@@ -361,6 +365,144 @@ export async function runSelfTest({
 		}
 	}
 
+	/**
+	 * The pictures the workspace already had.
+	 *
+	 * The self test writes pictures of its own — and they have to go
+	 * again. What the Markdown mentions is not always enough: a render
+	 * that fails half way leaves a picture behind that no note refers
+	 * to. So the folder is looked at before and after, and whatever
+	 * appeared in between goes.
+	 *
+	 * @returns {Promise<Set<String>|null>} the names, or null when the
+	 *   folder could not be read — then the caller knows it must not
+	 *   treat the difference of two readings as "everything is new"
+	 */
+	async function picturesInWorkspace() {
+		const names = new Set();
+		try {
+			const workspace = await addon._resolveWorkspaceDir();
+			if (!workspace) {
+				return null;
+			}
+			const dir = PathUtils.join(workspace, "data", "assets");
+			for (const child of await IOUtils.getChildren(dir)) {
+				const name = String(child.name || "");
+				if (name.startsWith("zotero-siyuan-")) {
+					names.add(name);
+				}
+			}
+		}
+		catch (e) {
+			// No folder, no permission — nothing to tell.
+			return null;
+		}
+		return names;
+	}
+
+	/**
+	 * The pictures the kernel knows about.
+	 *
+	 * A picture that a real note refers to is registered in the assets
+	 * table. A picture the self test left behind is not — nobody ever
+	 * linked it. This is what tells the two apart, so a note that is
+	 * sent while the self test runs does not lose its picture.
+	 *
+	 * @returns {Promise<Set<String>|null>} the names, or null when the
+	 *   kernel could not be asked
+	 */
+	async function registeredPictures() {
+		const names = new Set();
+		try {
+			const cli = addon.getCLI();
+			const rows = await cli.runJSON([
+				"sql",
+				"SELECT path FROM assets WHERE path LIKE '%zotero-siyuan-%'",
+			]);
+			for (const row of rows || []) {
+				const path = String(row.path || "");
+				const name = path.split("/").pop();
+				if (name) {
+					names.add(name);
+				}
+			}
+		}
+		catch (e) {
+			return null;
+		}
+		return names;
+	}
+
+	/**
+	 * Take one picture out of the workspace's assets folder.
+	 *
+	 * @param {String} name - the file name, without any path
+	 * @returns {Promise<Boolean>} whether a file was really removed
+	 */
+	async function removePictureNamed(name) {
+		const workspace = await addon._resolveWorkspaceDir();
+		if (!workspace) {
+			return false;
+		}
+		// The name is a plain file name, so it may go into the path as a
+		// component — PathUtils.join refuses components that carry a
+		// separator of their own.
+		const path = PathUtils.join(workspace, "data", "assets", name);
+		if (!(await IOUtils.exists(path))) {
+			return false;
+		}
+		await IOUtils.remove(path, { ignoreAbsent: true });
+		return true;
+	}
+
+	/**
+	 * The pictures that showed up while the self test ran and that no
+	 * note refers to.
+	 *
+	 * The picture is written into the assets folder before the note
+	 * that mentions it — the note has to point at a file that is really
+	 * there. When the send fails in between, the file stays and the
+	 * Markdown never names it, so it would survive the cleanup by name.
+	 * The difference between the folder before and after the run finds
+	 * those.
+	 *
+	 * @param {Set<String>|null} before - the pictures the workspace had
+	 *   when the self test started
+	 * @param {Set<String>} named - the pictures the Markdown named
+	 * @returns {Promise<String[]>} the names that were removed
+	 */
+	async function removeStrayPictures(before, named) {
+		if (!before) {
+			// The folder could not be read at the start — without that
+			// reading it is impossible to tell what is stray.
+			return [];
+		}
+		const after = await picturesInWorkspace();
+		if (!after) {
+			return [];
+		}
+		// A picture that a real note refers to is known to the kernel.
+		// A note sent while the self test runs must keep its picture.
+		const registered = await registeredPictures();
+		if (!registered) {
+			log("the kernel did not answer — the stray pictures stay");
+			return [];
+		}
+		const referenced = new Set([...registered, ...named]);
+		const removed = [];
+		for (const name of strayPictureNames(before, after, referenced)) {
+			try {
+				if (await removePictureNamed(name)) {
+					removed.push(name);
+				}
+			}
+			catch (e) {
+				log(`could not take back the stray picture ${name}: ${e}`);
+			}
+		}
+		return removed;
+	}
+
 	async function removeExportedPictures() {
 		if (!exportedPictures.size) {
 			return [];
@@ -497,6 +639,17 @@ export async function runSelfTest({
 		addon.watchNextSend(hooks);
 		button.click();
 	};
+
+	// What the assets folder holds before the run. Whatever is there
+	// afterwards and was not there before belongs to the self test —
+	// unless a note that the user sent in the meantime refers to it.
+	let picturesBefore = null;
+	try {
+		picturesBefore = await picturesInWorkspace();
+	}
+	catch (e) {
+		log(`could not read the assets folder: ${e}`);
+	}
 
 	try {
 		/* --- 1. can the plugin find the siyuan CLI? --------------------- */
@@ -1362,6 +1515,8 @@ export async function runSelfTest({
 		// Put the addon back the way it was — the self test must not change
 		// how the plugin behaves afterwards.
 		addon.watchNextSend(null);
+		// The pictures the Markdown named: they are ours, by name.
+		const namedPictures = new Set(exportedPictures);
 		// And take back every picture it wrote into the user's workspace:
 		// a self test that leaves its traces behind is not a self test.
 		try {
@@ -1384,6 +1539,22 @@ export async function runSelfTest({
 		}
 		catch (e) {
 			log(`could not take back the pending picture: ${e}`);
+		}
+		// And whatever else showed up in the assets folder in the
+		// meantime: the render can fail before it ever mentions the
+		// picture it wrote, so the picture is known by name only. A
+		// picture that a real note refers to stays.
+		try {
+			const stray = await removeStrayPictures(picturesBefore, namedPictures);
+			if (stray.length) {
+				log(`took back ${stray.length} stray picture(s)`);
+				report.picturesRemoved = (report.picturesRemoved || []).concat(
+					stray,
+				);
+			}
+		}
+		catch (e) {
+			log(`could not take back the stray pictures: ${e}`);
 		}
 	}
 

@@ -101,7 +101,25 @@ const VARIABLE = /\{\{\s*([A-Za-z][A-Za-z0-9]*)\s*\}\}/g;
 const CONDITIONAL = /\{\{#if\s+([A-Za-z][A-Za-z0-9]*)\s*\}\}/;
 
 /**
- * Is a variable "there"?
+ * A variable that has no value.
+ *
+ * It is not an empty string: an empty string would leave a blank line
+ * behind, and a blank line is a place in the note that nothing fills.
+ * The marker says "this was a variable, and it was empty", so the line
+ * can be taken away afterwards.
+ */
+const EMPTY = "\u0001";
+
+/**
+ * A conditional that was not taken.
+ *
+ * Its body is gone — but the place it took is still there, and it has
+ * to be taken away with it.
+ */
+const SKIPPED = "\u0002";
+
+/**
+ * Is this variable "there"?
  *
  * An empty string counts as "not there" — that is what makes the
  * conditional hide a block when there is no comment.
@@ -186,6 +204,11 @@ export function renderConditionals(text, values, unknown = []) {
 		if (isFilled(values[name])) {
 			result += renderConditionals(text.slice(bodyStart, bodyEnd), values, unknown);
 		}
+		else {
+			// The block was not taken. Its place is marked, so the empty
+			// line it leaves behind goes with it.
+			result += SKIPPED;
+		}
 		index = afterEnd;
 	}
 	return result;
@@ -193,6 +216,11 @@ export function renderConditionals(text, values, unknown = []) {
 
 /**
  * Render a template.
+ *
+ * A variable without a value does not leave a blank line behind: when a
+ * line held nothing but variables, and none of them had a value, the
+ * whole line goes. A line that holds text of its own stays — "作者："
+ * without a name is still something the reader asked for.
  *
  * @param {String} template
  * @param {Object} vars - the values from `collectMetadata()`
@@ -213,13 +241,45 @@ export function renderTemplate(template, vars) {
 			if (!unknown.includes(name)) {
 				unknown.push(name);
 			}
-			return "";
+			return EMPTY;
 		}
 		const value = values[name];
-		return value == null ? "" : String(value);
+		if (value == null) {
+			return EMPTY;
+		}
+		const plain = String(value);
+		return plain.trim() === "" ? EMPTY : plain;
 	});
 
-	return { text, unknown };
+	return { text: dropEmptyLines(text), unknown };
+}
+
+/**
+ * Take away the lines that nothing fills.
+ *
+ * A line that held nothing but variables — and none of them had a value
+ * — is a blank line in the note that nobody asked for. It goes.
+ *
+ * A line that holds text of its own stays: "作者：" without a name is
+ * still what the template asked for.
+ *
+ * @param {String} text - the rendered Markdown
+ * @returns {String}
+ */
+function dropEmptyLines(text) {
+	const kept = [];
+	for (const line of String(text || "").split("\n")) {
+		const marked = line.includes(EMPTY) || line.includes(SKIPPED);
+		if (marked) {
+			const rest = line.split(EMPTY).join("").split(SKIPPED).join("");
+			if (rest.trim() === "") {
+				// Nothing but empty values — the line goes with them.
+				continue;
+			}
+		}
+		kept.push(line.split(EMPTY).join("").split(SKIPPED).join(""));
+	}
+	return kept.join("\n");
 }
 
 /**

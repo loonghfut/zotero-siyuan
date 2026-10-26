@@ -22,9 +22,19 @@ export function escapeInline(text) {
 		.replace(/^(\s*)(\d+)\.(\s)/gm, "$1$2\\.$3");
 }
 
-/** Prefix every line with "> " so the text becomes a callout body. */
+/**
+ * Prefix every line with "> " so the text becomes a callout body.
+ *
+ * Nothing in, nothing out: an empty text would otherwise become a lone
+ * ">", and that is a quote with nothing in it — a line that takes up
+ * room in the note without saying anything.
+ */
 export function toCalloutBody(text) {
-	return String(text == null ? "" : text)
+	const value = String(text == null ? "" : text);
+	if (value.trim() === "") {
+		return "";
+	}
+	return value
 		.split("\n")
 		.map((line) => (line.trim() ? "> " + line : ">"))
 		.join("\n");
