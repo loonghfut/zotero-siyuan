@@ -25,4 +25,4 @@ pref-variables = Available variables
 pref-variables-hint = Click a variable to insert it at the cursor; the ones your template already uses are bold.
 pref-insert-hint = Click to insert at the cursor
 pref-inserted = Inserted
-pref-template-hint = The template is Markdown. Use {{variable}} to insert a value and {{#if variable}}…{{/if}} to include a part only when the variable is not empty. The preview uses a real annotation from your library.
+pref-template-hint = The template is Markdown. Use {"{{"}variable{"}}"} to insert a value and {"{{"}#if variable{"}}"}…{"{{"}/if{"}}"} to include a part only when the variable is not empty. The preview uses a real annotation from your library.

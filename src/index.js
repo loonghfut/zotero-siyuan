@@ -76,6 +76,14 @@ class ZoteroSiYuanAddon {
     // the attachments whose blocks are in the index.
     this._delegatedDocs = new WeakSet();
     this._indexedAttachments = new Set();
+    // Reader documents the plugin has seen a render event for. Their sidebar
+    // is redrawn by the reader itself, and every redraw hands the plugin the
+    // event again — so they never have to be patched by hand.
+    this._renderedDocs = new WeakSet();
+    // The self test watches the send path without changing it: it puts its
+    // hooks here right before it clicks, and the click picks them up. A
+    // click that carries no hooks — every real one — is never affected.
+    this._pendingSendHooks = null;
     // The document of every reader that has rendered a sidebar. The reader
     // event for the context menu does not carry the document, so it is
     // remembered here while the sidebar renders.
@@ -227,6 +235,10 @@ class ZoteroSiYuanAddon {
     // a PDF with hundreds of annotations would otherwise pile up hundreds
     // of listeners.
     this._ensureDelegation(doc);
+
+    // The plugin is now part of this sidebar: the reader redraws it and
+    // hands the plugin the event again, so it never has to be patched.
+    this._renderedDocs.add(doc);
 
     // Say it once per reader, so the log shows whether the sidebar was
     // rendered after the plugin started.
@@ -397,6 +409,19 @@ class ZoteroSiYuanAddon {
       catch (e) {
         // A reader that cannot be a weak map key.
       }
+
+      // The marker is opened by a delegated listener, and this document has
+      // never seen a render event — so it has no listener yet.
+      this._ensureDelegation(doc);
+
+      // A reader the plugin already sees redraws itself and hands the
+      // plugin the event again, so there is nothing to patch: looking for
+      // the button again would only cost a DOM query per annotation, every
+      // two seconds, for three minutes.
+      if (this._renderedDocs.has(doc)) {
+        continue;
+      }
+
       const boxes = doc.querySelectorAll(".custom-sections");
       if (!boxes.length) {
         // A reader without annotations — or one that is not ready yet.
@@ -707,8 +732,37 @@ class ZoteroSiYuanAddon {
 
   /* ---------------------------------------------------------------- write */
 
+  /**
+   * The hooks of the send that is about to happen — and only that one.
+   *
+   * The self test puts its hooks on the addon right before it clicks the
+   * button, and the click handler calls `_send` synchronously. So the hooks
+   * are taken by exactly the send they were meant for, and a real click —
+   * which carries none — is never watched, redirected or delayed.
+   *
+   * @returns {Object|null} the hooks, or null for a real send
+   */
+  _takeSendHooks() {
+    const hooks = this._pendingSendHooks;
+    this._pendingSendHooks = null;
+    return hooks || null;
+  }
+
   async _send(annotation, reader, button) {
+    // The hooks are picked up here, synchronously: the click handler calls
+    // `_send` before it returns, so a hook that was put on the addon just
+    // before the click is certain to be the one this send uses — and a
+    // click that carries no hook is never affected by the self test.
+    const hooks = this._takeSendHooks();
+
     if (this._sending) {
+      // Another send is still running. Say so, instead of doing nothing —
+      // a button that does not react looks like a broken plugin.
+      this._flash(
+        button,
+        getString("zoteroSiYuan-busy", "Sending…"),
+        false,
+      );
       return;
     }
     this._sending = true;
@@ -716,7 +770,7 @@ class ZoteroSiYuanAddon {
     button.disabled = true;
 
     try {
-      const result = await this._sendAnnotation(annotation, reader);
+      const result = await this._sendAnnotation(annotation, reader, hooks);
       this._flash(button, getString("zoteroSiYuan-done", "Sent to SiYuan"), false);
       Zotero.debug(
         `ZoteroSiYuan: appended an annotation to the SiYuan daily note in notebook ${result.notebook.name} (${result.notebook.id}) via ${result.transport}` +
@@ -747,12 +801,19 @@ class ZoteroSiYuanAddon {
    *
    * @param {Object} annotation - the reader's annotation model
    * @param {Object} reader - the reader tab
+   * @param {Object} [hooks] - what the self test watches this send with
    * @returns {Promise<Object>} what happened
    */
-  async _sendAnnotation(annotation, reader) {
-    const markdown = await this._buildContent(annotation, reader);
+  async _sendAnnotation(annotation, reader, hooks = null) {
+    const markdown = await this._buildContent(annotation, reader, hooks);
+    if (hooks && hooks.stage) {
+      hooks.stage("resolving the notebook");
+    }
     const notebook = await this._resolveNotebook();
-    const sent = (await this._append(notebook.id, markdown)) || {};
+    if (hooks && hooks.notebook) {
+      hooks.notebook(notebook);
+    }
+    const sent = (await this._append(notebook.id, markdown, hooks)) || {};
     // `_append` answers with an object; accept a plain string too, so a
     // change there cannot silently lose the block id.
     const transport = typeof sent === "string" ? sent : sent.transport;
@@ -794,6 +855,11 @@ class ZoteroSiYuanAddon {
    */
   async _sendMany(ids, reader, doc) {
     if (this._sending) {
+      // Another send is still running — say so instead of doing nothing.
+      showToast({
+        title: getString("zoteroSiYuan-busy", "Sending…"),
+        message: getString("zoteroSiYuan-busy-hint", "Wait for it to finish."),
+      });
       return;
     }
     this._sending = true;
@@ -1015,9 +1081,18 @@ class ZoteroSiYuanAddon {
   /**
    * Append to today's daily note, preferring the CLI.
    *
+   * @param {String} notebookID
+   * @param {String} markdown
+   * @param {Object} [hooks] - what the self test watches this write with
    * @returns {Promise<{transport: String, documentID: String, blockID: String}>}
    */
-  async _append(notebookID, markdown) {
+  async _append(notebookID, markdown, hooks = null) {
+    // The self test watches a send of its own, so it decides what the write
+    // really does — a dry run, or a write it cleans up itself. A real send
+    // carries no hooks and goes straight through.
+    if (hooks && hooks.append) {
+      return await hooks.append(notebookID, markdown);
+    }
     const cli = this.getCLI();
     const since = siyuanTimestamp();
     try {
@@ -1124,6 +1199,19 @@ class ZoteroSiYuanAddon {
   }
 
   /**
+   * Watch the next send, without changing it.
+   *
+   * The self test uses this to see what a click really does. The hooks are
+   * taken by the very next send and by that one only — a click that comes
+   * after them is a real one again.
+   *
+   * @param {Object} hooks - { stage, notebook, append }
+   */
+  watchNextSend(hooks) {
+    this._pendingSendHooks = hooks || null;
+  }
+
+  /**
    * Run the end-to-end self test on demand.
    *
    * It drives the same code path a click takes — the reader event, the
@@ -1141,7 +1229,8 @@ class ZoteroSiYuanAddon {
     });
   }
 
-  async diagnose() {    const report = await this.getCLI().diagnose();
+  async diagnose() {
+    const report = await this.getCLI().diagnose();
     report.http = { ok: false, error: "" };
     if (!report.ok) {
       // The HTTP API is the fallback transport — check it too.
@@ -1169,17 +1258,24 @@ class ZoteroSiYuanAddon {
     return report;
   }
 
-  async _getParentItem(reader) {
+  async _getParentItem(reader, hooks = null) {
     try {
       const itemID = reader && reader.itemID;
       if (!itemID) {
         return null;
       }
+      if (hooks && hooks.stage) {
+        hooks.stage("reading the parent item");
+      }
       const attachment = await Zotero.Items.getAsync(itemID);
       if (!attachment || !attachment.parentItemID) {
         return null;
       }
-      return await Zotero.Items.getAsync(attachment.parentItemID);
+      const parent = await Zotero.Items.getAsync(attachment.parentItemID);
+      if (hooks && hooks.stage) {
+        hooks.stage("parent item read");
+      }
+      return parent;
     }
     catch (e) {
       Zotero.debug(`ZoteroSiYuan: could not resolve the parent item: ${e}`);
@@ -1242,10 +1338,11 @@ class ZoteroSiYuanAddon {
 
   /**
    * Render the template for an annotation.
+   * @param {Object} [hooks] - what the self test watches this render with
    * @returns {Promise<String>} the Markdown
    */
-  async _buildContent(annotation, reader) {
-    const parentItem = await this._getParentItem(reader);
+  async _buildContent(annotation, reader, hooks = null) {
+    const parentItem = await this._getParentItem(reader, hooks);
     const attachment = await this._getAttachment(reader);
     const annotationKey = await this._resolveAnnotationKey(annotation);
     const vars = collectMetadata({

@@ -260,7 +260,11 @@ async function collectDiagnostics(report, executable) {
 				out += chunk;
 			}
 			const code = await proc.wait();
-			return { output: out.trim(), exitCode: code };
+			// Gecko's `wait()` resolves with an *object* — `{ exitCode }` —
+			// and not with the number itself.
+			const exitCode =
+				code && typeof code.exitCode === "number" ? code.exitCode : code;
+			return { output: out.trim(), exitCode };
 		}),
 	);
 

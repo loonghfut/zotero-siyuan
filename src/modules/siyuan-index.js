@@ -95,6 +95,11 @@ export class SiYuanIndex {
 		this.blocks = new Map();
 		this.scannedAt = "";
 		this.blocksScanned = 0;
+		// Every entry is stamped with the moment it was learned. A scan
+		// that started earlier cannot know about an entry that was added
+		// while it was running — so those entries have to survive it.
+		this._revision = 0;
+		this._revisions = new Map();
 	}
 
 	get size() {
@@ -120,8 +125,23 @@ export class SiYuanIndex {
 	 */
 	add(annotationKey, blockID) {
 		if (annotationKey && blockID) {
-			this.blocks.set(String(annotationKey), String(blockID));
+			const key = String(annotationKey);
+			this.blocks.set(key, String(blockID));
+			this._revisions.set(key, ++this._revision);
 		}
+	}
+
+	/**
+	 * Forget an annotation again.
+	 * @param {String} annotationKey
+	 */
+	remove(annotationKey) {
+		if (!annotationKey) {
+			return;
+		}
+		const key = String(annotationKey);
+		this.blocks.delete(key);
+		this._revisions.delete(key);
 	}
 
 	/**
@@ -139,21 +159,34 @@ export class SiYuanIndex {
 		if (!/^[A-Za-z0-9]+$/.test(String(attachmentKey))) {
 			throw new Error(`"${attachmentKey}" is not an item key`);
 		}
+		// Everything that is added from now on is newer than the query
+		// below can be, so it has to survive it.
+		const revision = this._revision;
 		const rows = await cli.runJSON([
 			"sql",
 			"SELECT id, markdown, type FROM blocks " +
 				`WHERE markdown LIKE '%${ZOTERO_LINK_PREFIX}${attachmentKey}%' ` +
 				"ORDER BY created DESC, CASE WHEN type = 'p' THEN 1 ELSE 0 END ASC",
 		]);
-		let added = 0;
+		let found = 0;
+		const seen = new Set();
 		for (const row of rows || []) {
 			const key = parseAnnotationKey(row.markdown);
-			if (key && !this.blocks.has(key)) {
-				this.blocks.set(key, row.id);
-				added++;
+			if (!key || seen.has(key)) {
+				continue;
 			}
+			// The query is ordered by creation date, so the first row of a
+			// key is its newest block.
+			seen.add(key);
+			found++;
+			// An entry that was added while the query was running is newer
+			// than anything the query could have seen.
+			if ((this._revisions.get(key) || 0) > revision) {
+				continue;
+			}
+			this.blocks.set(key, row.id);
 		}
-		return added;
+		return found;
 	}
 
 	/**
@@ -163,6 +196,9 @@ export class SiYuanIndex {
 	 * @returns {Promise<Number>} how many annotations are known
 	 */
 	async refresh(cli) {
+		// Everything that is added from now on is newer than the query
+		// below can be, so it has to survive it.
+		const revision = this._revision;
 		const rows = await cli.runJSON([
 			"sql",
 			// The link lives in the *markdown* column: the plain-text
@@ -184,7 +220,21 @@ export class SiYuanIndex {
 				found.set(key, row.id);
 			}
 		}
+		// An annotation that was sent while the query was running is not in
+		// its result — that query cannot know about it. Its block is the
+		// newest one there is, so it has to win over the query's answer.
+		for (const [key, blockID] of this.blocks) {
+			if ((this._revisions.get(key) || 0) > revision) {
+				found.set(key, blockID);
+			}
+		}
 		this.blocks = found;
+		// Keep the stamps in step with the index, so it cannot grow forever.
+		for (const key of [...this._revisions.keys()]) {
+			if (!this.blocks.has(key)) {
+				this._revisions.delete(key);
+			}
+		}
 		this.blocksScanned = Array.isArray(rows) ? rows.length : 0;
 		this.scannedAt = new Date().toISOString();
 		return this.blocks.size;

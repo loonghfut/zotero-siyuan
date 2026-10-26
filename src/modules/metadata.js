@@ -9,11 +9,15 @@
 /**
  * Escape the characters that would otherwise be interpreted as Markdown
  * structure inside a paragraph.
+ *
+ * The square brackets matter as much as the rest: the title is put into a
+ * Markdown link, and a bracket in the title would end the link's text
+ * early — so `[A [weird] (title)]` has to become `[A \[weird\] (title)]`.
  */
 export function escapeInline(text) {
 	return String(text == null ? "" : text)
 		.replace(/\\/g, "\\\\")
-		.replace(/([*_`])/g, "\\$1")
+		.replace(/([*_`[\]])/g, "\\$1")
 		.replace(/^(\s*)([-+>])(\s)/gm, "$1\\$2$3")
 		.replace(/^(\s*)(\d+)\.(\s)/gm, "$1$2\\.$3");
 }

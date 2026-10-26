@@ -3,6 +3,8 @@
 /* eslint-disable */
 // @ts-nocheck
 export type FluentMessageId =
+  | 'busy'
+  | 'busy-hint'
   | 'button-label'
   | 'comment-title'
   | 'done'
@@ -31,6 +33,7 @@ export type FluentMessageId =
   | 'pref-selftest-ok'
   | 'pref-selftesting'
   | 'pref-template'
+  | 'pref-template-hint'
   | 'pref-template-reset'
   | 'pref-template-reset-done'
   | 'pref-template-saved'

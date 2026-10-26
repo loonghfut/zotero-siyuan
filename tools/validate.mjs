@@ -9,7 +9,8 @@
  * Usage: node tools/validate.mjs
  */
 import { readFileSync, readdirSync, existsSync } from "node:fs";
-import { join, relative, extname } from "node:path";import { execFileSync } from "node:child_process";
+import { join, relative, extname } from "node:path";
+import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import zlib from "node:zlib";
 
@@ -125,6 +126,66 @@ if (localeIds["en-US"] && localeIds["zh-CN"]) {
     check(
       `message "${id}" is defined in both locales`,
       en.has(bare) && zh.has(bare),
+    );
+  }
+}
+
+/* ---- 3b. the Fluent files must really parse ------------------------- */
+
+section("Fluent syntax");
+{
+  // A regular expression is not enough here: Fluent reads `{` as the start
+  // of a placeable, so a message whose text contains `{{variable}}` is not
+  // a message at all — it is junk, and it never reaches the interface. The
+  // real parser is the only thing that notices.
+  const { parse } = await import("@fluent/syntax");
+  for (const loc of ["en-US", "zh-CN"]) {    for (const name of ["addon.ftl", "preferences.ftl"]) {
+      const file = join(ROOT, "addon", "locale", loc, name);
+      if (!existsSync(file)) {
+        continue;
+      }
+      const resource = parse(readFileSync(file, "utf8"));
+      const junk = resource.body
+        .filter((entry) => entry.type === "Junk")
+        .map((entry) => {
+          const content = entry.content;
+          return typeof content === "string"
+            ? content.split("\n")[0]
+            : JSON.stringify(content).slice(0, 80);
+        });
+      check(
+        `${loc}/${name} parses without junk`,
+        junk.length === 0,
+        junk.join(" | "),
+      );
+    }
+  }
+
+  // Every id the preferences pane asks for has to exist — and the ids have
+  // to be the ones the interface really asks for.
+  const xhtml = readFileSync(
+    join(ROOT, "addon", "content", "preferences.xhtml"),
+    "utf8",
+  );
+  const asked = [...xhtml.matchAll(/data-l10n-id="([^"]+)"/g)].map(
+    (m) => m[1],
+  );
+  const defined = new Set();
+  for (const loc of ["en-US", "zh-CN"]) {
+    const file = join(ROOT, "addon", "locale", loc, "preferences.ftl");
+    if (!existsSync(file)) {
+      continue;
+    }
+    for (const entry of parse(readFileSync(file, "utf8")).body) {
+      if (entry.type === "Message") {
+        defined.add(entry.id.name);
+      }
+    }
+  }
+  for (const id of asked) {
+    check(
+      `the preferences pane's "${id}" is a real message`,
+      defined.has(id),
     );
   }
 }
@@ -632,6 +693,126 @@ section("Reader sidebar contract");
     source.includes("_createButton(doc, annotation, event.reader)") &&
       source.includes("_createButton(doc, this._annotationFromItem(item), reader)"),
   );
+}
+
+/* --------------------- 13. the fixes must not come back ------------------ */
+
+section("Regression guards");
+{
+  // --- the template engine must not leave a stray {{/if}} behind -------
+  {
+    const { renderTemplate } = await import(
+      new URL("../src/modules/template.js", import.meta.url).href
+    );
+    const nested = renderTemplate("{{#if a}}{{#if b}}X{{/if}}{{/if}}", {
+      a: "",
+      b: "yes",
+    });
+    check(
+      "a nested conditional leaves no stray {{/if}}",
+      nested.text === "" && !nested.text.includes("{{"),
+      JSON.stringify(nested.text),
+    );
+    const nestedKept = renderTemplate("{{#if a}}{{#if b}}X{{/if}}{{/if}}", {
+      a: "yes",
+      b: "yes",
+    });
+    check(
+      "a nested conditional keeps its body when it is filled",
+      nestedKept.text === "X",
+      JSON.stringify(nestedKept.text),
+    );
+    const single = renderTemplate("{{#if a}}X{{/if}}", { a: "yes" });
+    check(
+      "a single conditional still works",
+      single.text === "X",
+      JSON.stringify(single.text),
+    );
+    const unknown = renderTemplate("{{#if nope}}X{{/if}}", { a: "yes" });
+    check(
+      "an unknown variable in a conditional is reported",
+      unknown.unknown.includes("nope"),
+      JSON.stringify(unknown.unknown),
+    );
+  }
+
+  // --- a scan must not throw away what was added while it ran ----------
+  {
+    const { SiYuanIndex } = await import(
+      new URL("../src/modules/siyuan-index.js", import.meta.url).href
+    );
+    const link =
+      "[t](zotero://open/library/items/ATTACH01?annotation=ABCD1234&page=3)";
+    let release;
+    const gate = new Promise((resolve) => {
+      release = resolve;
+    });
+    const cli = {
+      runJSON: async () => {
+        await gate;
+        return [{ id: "old-block", markdown: link }];
+      },
+    };
+    const index = new SiYuanIndex();
+    const scanning = index.refresh(cli);
+    // The annotation is sent while the scan is still running — the scan's
+    // snapshot cannot know about it, so it has to survive the scan.
+    index.add("ABCD1234", "newest-block");
+    release();
+    await scanning;
+    check(
+      "a scan keeps an annotation that was sent while it ran",
+      index.get("ABCD1234") === "newest-block",
+      index.get("ABCD1234"),
+    );
+    check(
+      "the index can forget an annotation again",
+      typeof index.remove === "function" &&
+        (index.remove("ABCD1234"), index.get("ABCD1234") === ""),
+    );
+  }
+
+  // --- the self test must not take the plugin over ---------------------
+  {
+    const source = readFileSync(
+      join(ROOT, "src", "modules", "selftest.js"),
+      "utf8",
+    );
+    check(
+      "the self test does not replace the plugin's own methods",
+      !/addon\._(append|send|resolveNotebook|getParentItem)\s*=/.test(source),
+      "a replaced method would swallow a real send that happens meanwhile",
+    );
+    const index = readFileSync(join(ROOT, "src", "index.js"), "utf8");
+    check(
+      "the plugin offers a way to watch the next send",
+      index.includes("watchNextSend") && index.includes("_takeSendHooks"),
+    );
+  }
+
+  // --- the language must not be pinned to English -----------------------
+  {
+    const source = readFileSync(join(ROOT, "src", "utils", "locale.js"), "utf8");
+    check(
+      "the Fluent bundle is not pinned to en-US",
+      !/locale\/en-US\/\$\{file\}/.test(source) &&
+        source.includes("FALLBACK_LOCALE"),
+      "the reader's own strings would stay English in every language",
+    );
+  }
+
+  // --- a title with brackets must not break the link -------------------
+  {
+    const { escapeInline } = await import(
+      new URL("../src/modules/metadata.js", import.meta.url).href
+    );
+    const escaped = escapeInline("A [weird] (title)");
+    check(
+      "a square bracket in a title is escaped",
+      escaped.includes("\\[") && escaped.includes("\\]"),
+      escaped,
+    );
+  }
 }
 
 /* --------------------------- 4. packaged XPI ---------------------------- */

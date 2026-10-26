@@ -89,7 +89,101 @@ export const DEFAULT_TEMPLATE = [
 ].join("\n");
 
 const VARIABLE = /\{\{\s*([A-Za-z][A-Za-z0-9]*)\s*\}\}/g;
-const CONDITIONAL = /\{\{#if\s+([A-Za-z][A-Za-z0-9]*)\s*\}\}([\s\S]*?)\{\{\/if\}\}/g;
+// Not a global regex on purpose: `exec` on a global one keeps its
+// `lastIndex` between calls, and the search below starts at a different
+// place every time.
+const CONDITIONAL = /\{\{#if\s+([A-Za-z][A-Za-z0-9]*)\s*\}\}/;
+
+/**
+ * Is a variable "there"?
+ *
+ * An empty string counts as "not there" — that is what makes the
+ * conditional hide a block when there is no comment.
+ */
+function isFilled(value) {
+	return value !== undefined &&
+		value !== null &&
+		String(value).trim() !== "";
+}
+
+/**
+ * The end of the conditional that starts at `from`.
+ *
+ * The conditionals may be nested, so the matching `{{/if}}` is the one that
+ * closes the *outermost* open conditional — not simply the first one that
+ * turns up. A regular expression cannot count, so the tags are walked by
+ * hand.
+ *
+ * @param {String} text - the whole template
+ * @param {Number} from - where the body of the conditional starts
+ * @returns {{bodyEnd: Number, afterEnd: Number}} the end of the body and
+ *   the end of the whole block
+ */
+function findConditionalEnd(text, from) {
+	const token = /\{#if\s+[A-Za-z][A-Za-z0-9]*\s*\}|\{\{\/if\}\}/g;
+	let depth = 1;
+	token.lastIndex = from;
+	let match;
+	while ((match = token.exec(text))) {
+		if (match[0] === "{{/if}}") {
+			depth--;
+			if (depth === 0) {
+				return { bodyEnd: match.index, afterEnd: match.index + match[0].length };
+			}
+		}
+		else {
+			depth++;
+		}
+	}
+	// No matching end — the template is broken, so the rest is left alone.
+	return { bodyEnd: -1, afterEnd: -1 };
+}
+
+/**
+ * Resolve the conditionals of a template.
+ *
+ * A conditional whose variable is filled keeps its body — and the body may
+ * hold conditionals of its own, which are resolved as well. One whose
+ * variable is empty is removed completely, together with both of its tags.
+ *
+ * @param {String} text
+ * @param {Object} values
+ * @param {String[]} unknown - collects the names that do not exist
+ * @returns {String}
+ */
+export function renderConditionals(text, values, unknown = []) {
+	let result = "";
+	let index = 0;
+	while (index < text.length) {
+		const open = text.slice(index).match(CONDITIONAL);
+		if (!open) {
+			result += text.slice(index);
+			break;
+		}
+		const openStart = index + open.index;
+		const name = open[1];
+		result += text.slice(index, openStart);
+
+		if (!Object.prototype.hasOwnProperty.call(values, name)) {
+			if (!unknown.includes(name)) {
+				unknown.push(name);
+			}
+		}
+
+		const bodyStart = openStart + open[0].length;
+		const { bodyEnd, afterEnd } = findConditionalEnd(text, bodyStart);
+		if (afterEnd === -1) {
+			// Unbalanced — keep what is left as it is.
+			result += text.slice(openStart);
+			break;
+		}
+		if (isFilled(values[name])) {
+			result += renderConditionals(text.slice(bodyStart, bodyEnd), values, unknown);
+		}
+		index = afterEnd;
+	}
+	return result;
+}
 
 /**
  * Render a template.
@@ -104,21 +198,9 @@ export function renderTemplate(template, vars) {
 	const values = vars || {};
 	let text = String(template == null ? "" : template);
 
-	// Conditionals first, so their bodies may contain variables themselves.
-	// They are applied repeatedly because a conditional may sit inside
-	// another one.
-	let previous;
-	do {
-		previous = text;
-		text = text.replace(CONDITIONAL, (match, name, body) => {
-			const value = values[name];
-			const keep =
-				value !== undefined &&
-				value !== null &&
-				String(value).trim() !== "";
-			return keep ? body : "";
-		});
-	} while (text !== previous);
+	// The conditionals first, so their bodies may contain variables
+	// themselves.
+	text = renderConditionals(text, values, unknown);
 
 	text = text.replace(VARIABLE, (match, name) => {
 		if (!Object.prototype.hasOwnProperty.call(values, name)) {

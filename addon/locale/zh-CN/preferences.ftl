@@ -25,4 +25,4 @@ pref-variables = 可用变量
 pref-variables-hint = 点一个变量名就能把它插到模板的光标处；已经用过的变量会加粗。
 pref-insert-hint = 点击插入到光标处
 pref-inserted = 已插入
-pref-template-hint = 模板就是 Markdown。用 {{变量}} 插入内容，用 {{#if 变量}}…{{/if}} 只在变量不为空时保留这一段。预览用的是你库里真实的一条注释。
+pref-template-hint = 模板就是 Markdown。用 {"{{"}变量{"}}"} 插入内容，用 {"{{"}#if 变量{"}}"}…{"{{"}/if{"}}"} 只在变量不为空时保留这一段。预览用的是你库里真实的一条注释。

@@ -213,7 +213,8 @@ export class SiYuanHTTP {
     return text;
   }
 
-  static async readWorkspaceConf(dir) {    const path = PathUtils.join(dir, "conf", "conf.json");
+  static async readWorkspaceConf(dir) {
+    const path = PathUtils.join(dir, "conf", "conf.json");
     const text = await Zotero.File.getContentsAsync(path);
     return JSON.parse(text);
   }

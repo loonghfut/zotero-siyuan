@@ -1,7 +1,7 @@
 {
   "name": "zotero-siyuan",
   "type": "module",
-  "version": "0.2.52",
+  "version": "0.2.54",
   "description": "Send a Zotero PDF reader annotation and its comment to your SiYuan daily note.",
   "config": {
     "addonName": "Zotero to SiYuan",
@@ -24,6 +24,7 @@
     "lint": "node tools/validate.mjs"
   },
   "devDependencies": {
+    "@fluent/syntax": "^0.19.0",
     "zotero-plugin-scaffold": "^0.9.3"
   }
 }

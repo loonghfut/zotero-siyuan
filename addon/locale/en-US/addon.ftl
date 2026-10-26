@@ -1,6 +1,8 @@
 button-label = Send to SiYuan
 done = Sent to SiYuan
 failed = Failed
+busy = Sending…
+busy-hint = Wait for it to finish.
 sent-title = Already sent to SiYuan — click to open that block
 toast-title = Sent to SiYuan
 toast-open = Open in SiYuan

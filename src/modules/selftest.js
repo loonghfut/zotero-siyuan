@@ -380,72 +380,78 @@ export async function runSelfTest({
 		return entry;
 	}
 
-	// --- instrument the addon, so we can see what the click actually did ---
+	// --- watch the send, without changing it -------------------------
+	//
+	// The hooks are put on the addon right before the click, and the click
+	// picks them up. Nothing on the plugin is replaced, so a real send that
+	// happens while the self test runs stays a real send: it is written,
+	// and the cleanup below does not touch it.
 	const original = {
-		resolveNotebook: addon._resolveNotebook,
 		append: addon._append,
-		send: addon._send,
-		parentItem: addon._getParentItem,
-	};
-
-	addon._getParentItem = async (...args) => {
-		captured.stage = "reading the parent item";
-		const item = await original.parentItem.apply(addon, args);
-		captured.stage = "parent item read";
-		return item;
-	};
-
-	addon._resolveNotebook = async (...args) => {
-		captured.stage = "resolving the notebook";
-		const notebook = await original.resolveNotebook.apply(addon, args);
-		captured.notebook = { id: notebook.id, name: notebook.name };
-		captured.stage = "notebook resolved";
-		return notebook;
-	};
-
-	addon._append = async (notebookID, markdown) => {
-		captured.markdown = markdown;
-		captured.stage = "appending";
-		if (realWrite) {
-			const result = await original.append.call(addon, notebookID, markdown);
-			captured.transport = result.transport;
-			captured.blockID = result.blockID;
-			captured.blocks = result.blocks || [];
-			captured.documentID = result.documentID;
-			captured.stage = "appended";
-			// The real method answers with an object — the override has to
-			// look just like it, or the caller sees nothing.
-			return result;
-		}
-		// Let the CLI itself validate the exact command it would run.
-		// (`dailynote append` answers in plain text, never in JSON.)
-		const cli = addon.getCLI();
-		captured.dryRun = await cli.runRaw([
-			"dailynote",
-			"append",
-			"--notebook",
-			notebookID,
-			"--data",
-			markdown,
-			"--dry-run",
-		]);
-		captured.transport = "dry run";
-		captured.stage = "dry run done";
-		return {
-			transport: "dry run",
-			documentID: "",
-			blockID: "",
-		};
 	};
 
 	let clicked = false;
-	addon._send = async (...args) => {
-		try {
-			return await original.send.apply(addon, args);
-		}
-		finally {
+	const hooks = {
+		stage(stage) {
+			captured.stage = stage;
+		},
+		notebook(notebook) {
+			captured.notebook = { id: notebook.id, name: notebook.name };
+			captured.stage = "notebook resolved";
+		},
+		async append(notebookID, markdown) {
 			clicked = true;
-		}
+			captured.markdown = markdown;
+			captured.stage = "appending";
+			if (realWrite) {
+				const result = await original.append.call(
+					addon,
+					notebookID,
+					markdown,
+				);
+				captured.transport = result.transport;
+				captured.blockID = result.blockID;
+				captured.blocks = result.blocks || [];
+				captured.documentID = result.documentID;
+				captured.stage = "appended";
+				// The real method answers with an object — the hook has to
+				// look just like it, or the caller sees nothing.
+				return result;
+			}
+			// Let the CLI itself validate the exact command it would run.
+			// (`dailynote append` answers in plain text, never in JSON.)
+			const cli = addon.getCLI();
+			captured.dryRun = await cli.runRaw([
+				"dailynote",
+				"append",
+				"--notebook",
+				notebookID,
+				"--data",
+				markdown,
+				"--dry-run",
+			]);
+			captured.transport = "dry run";
+			captured.stage = "dry run done";
+			return {
+				transport: "dry run",
+				documentID: "",
+				blockID: "",
+			};
+		},
+	};
+
+	/**
+	 * Click a button and let the send it starts be watched.
+	 *
+	 * The hooks go on the addon and the click follows right away, with
+	 * nothing in between — so the click handler, which runs synchronously,
+	 * is certain to pick them up. And only that one click does.
+	 *
+	 * @param {Object} button - the button to click
+	 */
+	const clickAndWatch = (button) => {
+		addon.watchNextSend(hooks);
+		button.click();
 	};
 
 	try {
@@ -598,7 +604,7 @@ export async function runSelfTest({
 				},
 			});
 			const link = sentDoc.body.querySelector(".zotero-siyuan-sent-link");
-			addon._index.blocks.delete("SELFTESTSENT");
+			addon._index.remove("SELFTESTSENT");
 			return {
 				rendered: !!link,
 				href: link ? link.getAttribute("href") : "",
@@ -619,7 +625,7 @@ export async function runSelfTest({
 			const added = addon._updateRenderedMarkers(doc);
 			const link = doc.body.querySelector(".zotero-siyuan-sent-link");
 			const again = addon._updateRenderedMarkers(doc);
-			addon._index.blocks.delete("SELFKEY1");
+			addon._index.remove("SELFKEY1");
 			return {
 				added,
 				again,
@@ -685,7 +691,7 @@ export async function runSelfTest({
 			// markers in the first place.
 			const boxes = box.children.length;
 
-			addon._index.blocks.delete(key);
+			addon._index.remove(key);
 			return {
 				afterFirst,
 				afterManual,
@@ -756,7 +762,7 @@ export async function runSelfTest({
 				".zotero-siyuan-sent-link",
 			).length;
 
-			addon._index.blocks.delete(key);
+			addon._index.remove(key);
 			return {
 				before,
 				afterSend,
@@ -1042,7 +1048,11 @@ export async function runSelfTest({
 			clicked = false;
 			const button = doc.querySelector(".zotero-siyuan-annotation-button");
 			const key = button.getAttribute("data-zsi-annotation");
-			button.click();
+			// What the index knew about this annotation before the test —
+			// it may be a block the user sent themselves, and that one must
+			// survive the cleanup below.
+			const previousBlock = addon._index.get(key);
+			clickAndWatch(button);
 
 			// Wait for the send to finish — the plugin says so itself.
 			const sendDeadline = Date.now() + 30000;
@@ -1110,12 +1120,19 @@ export async function runSelfTest({
 				};
 			}
 
-			// Leave nothing behind.
-			const blockID = addon._index.get(key);
-			if (blockID) {
-				await cli.deleteBlock(blockID);
+			// Leave nothing behind — but only what this test wrote itself.
+			// A block the user sent for this annotation is not ours to
+			// delete, and the index has to point back at it.
+			const ownBlock = captured.blockID || "";
+			if (ownBlock) {
+				await cli.deleteBlock(ownBlock);
 			}
-			addon._index.blocks.delete(key);
+			if (previousBlock) {
+				addon._index.add(key, previousBlock);
+			}
+			else {
+				addon._index.remove(key);
+			}
 
 			// Give the main flow its own bookkeeping back.
 			Object.assign(captured, capturedBefore);
@@ -1132,12 +1149,12 @@ export async function runSelfTest({
 				manual: doc.querySelectorAll("[data-zsi-manual]").length,
 				detail,
 				allBoxes,
-				blockID,
+				blockID: ownBlock,
 			};
 		});
 
 		/* --- 4. click it, like a user would ------------------------------ */
-		button.click();
+		clickAndWatch(button);
 
 		// Wait for *this* click to finish — not just for the handler to
 		// have been called, but for the write to be complete.
@@ -1231,10 +1248,7 @@ export async function runSelfTest({
 	finally {
 		// Put the addon back the way it was — the self test must not change
 		// how the plugin behaves afterwards.
-		delete addon._resolveNotebook;
-		delete addon._append;
-		delete addon._send;
-		delete addon._getParentItem;
+		addon.watchNextSend(null);
 	}
 
 	report.stage = captured.stage;
