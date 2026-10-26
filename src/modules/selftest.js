@@ -22,6 +22,7 @@
 
 import { tempFilePath } from "../utils/paths.js";
 import { clearLegacyTags } from "./siyuan-index.js";
+import { pictureAssetNames, removePicture } from "./siyuan-image.js";
 import {
 	findHandlerExecutable,
 	protocolHandlerCommand,
@@ -345,6 +346,46 @@ export async function runSelfTest({
 		documentID: "",
 	};
 
+	// The pictures this test caused to be written into the workspace.
+	//
+	// A "框选" annotation brings its picture along, and the picture goes
+	// into the workspace *before* the note is written — the note has to
+	// refer to a file that is really there. A dry run writes no note, so
+	// the picture it left behind would be litter. They are collected here
+	// and taken back at the end.
+	const exportedPictures = new Set();
+
+	function notePictures(markdown) {
+		for (const name of pictureAssetNames(markdown)) {
+			exportedPictures.add(name);
+		}
+	}
+
+	async function removeExportedPictures() {
+		if (!exportedPictures.size) {
+			return [];
+		}
+		const workspace = await addon._resolveWorkspaceDir();
+		if (!workspace) {
+			return [];
+		}
+		const removed = [];
+		for (const name of exportedPictures) {
+			try {
+				const path = PathUtils.join(workspace, "data", "assets", name);
+				if (await IOUtils.exists(path)) {
+					await IOUtils.remove(path, { ignoreAbsent: true });
+					removed.push(name);
+				}
+			}
+			catch (e) {
+				log(`could not take back the picture ${name}: ${e}`);
+			}
+		}
+		exportedPictures.clear();
+		return removed;
+	}
+
 	function record(name, ok, detail) {
 		const entry = { name, ok: !!ok };
 		if (detail !== undefined && detail !== null) {
@@ -402,6 +443,9 @@ export async function runSelfTest({
 		async append(notebookID, markdown) {
 			clicked = true;
 			captured.markdown = markdown;
+			// A "框选" annotation brings its picture along — remember it, so
+			// it can be taken back when the test is over.
+			notePictures(markdown);
 			captured.stage = "appending";
 			if (realWrite) {
 				const result = await original.append.call(
@@ -826,6 +870,10 @@ export async function runSelfTest({
 			const markdown = await addon._buildContent(annotation, {
 				itemID: attachmentID,
 			});
+			// This render writes nothing — but a "框选" annotation put its
+			// picture into the workspace on the way, and that picture has
+			// to be taken back too.
+			notePictures(markdown);
 			const help = addon.getTemplateHelp();
 			const preview = await addon.previewTemplate(help.template);
 			report.template = help.template;
@@ -839,6 +887,71 @@ export async function runSelfTest({
 			record("render the send template", false, e.message);
 			throw e;
 		}
+
+		/* --- 3c. an area selection brings its picture -------------------- */
+		//
+		// A "框选" annotation has no text: the selection is a picture, and
+		// the picture has to travel with the note. This step walks the whole
+		// chain with a real one — where Zotero keeps it, whether the file is
+		// there, and what the note finally says.
+		await step("an area selection brings its picture", async () => {
+			const probe = await addon.probePictures();
+			report.pictures = probe;
+			if (!probe.annotations.length) {
+				// Nothing to test — that is not a failure.
+				return {
+					skipped: "the library has no area selection",
+					cacheDir: probe.cacheDir,
+				};
+			}
+			const first = probe.annotations[0];
+			const picture = {
+				key: first.key,
+				type: first.type,
+				path: first.path,
+				cached: first.exists,
+			};
+			if (!first.exists) {
+				// The picture is not where Zotero says it is. The note can
+				// still be written, but the selection would be lost — so
+				// this is worth saying out loud.
+				throw new Error(
+					`the picture of ${first.key} is not at ${first.path || "(no path)"}`,
+				);
+			}
+			// The whole chain, with a real annotation.
+			const model = {
+				id: first.key,
+				type: first.type,
+				text: "",
+				comment: "",
+				pageLabel: "",
+				authorName: "",
+				position: null,
+				tags: [],
+			};
+			const markdown = await addon._buildContent(model, {
+				itemID: attachmentID,
+			});
+			notePictures(markdown);
+			picture.markdown = markdown;
+			// Every step of the chain — this is where a failure says what
+			// went wrong.
+			picture.trace = addon._lastPictureTrace || null;
+			picture.linked = /!\[[^\]]*\]\(assets\/[^)]+\)/.test(markdown);
+			if (!picture.linked) {
+				const trace = picture.trace || {};
+				throw new Error(
+					"the note does not carry the picture — no Markdown link to it" +
+						(trace.error ? ` (${trace.error})` : "") +
+						` [picture=${trace.isPicture}, key=${trace.key}, ` +
+						`cache=${trace.cached}, path=${trace.cachePath || "none"}, ` +
+						`workspace=${trace.workspace || "none"}, ` +
+						`exported=${trace.exported || "none"}]`,
+				);
+			}
+			return picture;
+		});
 
 		/* --- 3c. the batch entry and the bubble -------------------------- */
 		await step("the annotation context menu offers a batch send", () => {
@@ -1249,6 +1362,29 @@ export async function runSelfTest({
 		// Put the addon back the way it was — the self test must not change
 		// how the plugin behaves afterwards.
 		addon.watchNextSend(null);
+		// And take back every picture it wrote into the user's workspace:
+		// a self test that leaves its traces behind is not a self test.
+		try {
+			const removed = await removeExportedPictures();
+			if (removed.length) {
+				log(`took back ${removed.length} exported picture(s)`);
+				report.picturesRemoved = removed;
+			}
+		}
+		catch (e) {
+			log(`could not take back the exported pictures: ${e}`);
+		}
+		// A picture that was exported but never ended up in a note — the
+		// send failed halfway through — has to go back as well.
+		try {
+			if (addon._pendingPicture && addon._pendingPicture.file) {
+				await removePicture(addon._pendingPicture.file);
+				addon._pendingPicture = null;
+			}
+		}
+		catch (e) {
+			log(`could not take back the pending picture: ${e}`);
+		}
 	}
 
 	report.stage = captured.stage;

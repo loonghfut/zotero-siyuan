@@ -33,10 +33,36 @@
   margin-block: 0;
 }
 
+/* The ready-made templates. */
+#zotero-prefpane-zoteroSiYuan-template-preset {
+  flex: 1;
+  min-width: 12em;
+  margin-inline-end: 8px;
+}
+
+/* The filter for the cheat sheet. */
+#zotero-prefpane-zoteroSiYuan-variable-filter {
+  flex: 1;
+  min-width: 10em;
+  margin-inline: 8px;
+}
+
+/* What is wrong with the template. */
+.zotero-siyuan-problems {
+  display: none;
+  margin: 0 0 6px 0;
+  padding: 6px 8px;
+  font-size: 0.9em;
+  color: var(--accent-red, #d33);
+  background: rgba(211, 51, 51, 0.1);
+  border: 1px solid rgba(211, 51, 51, 0.35);
+  border-radius: 4px;
+}
+
 /* The template editor. */
 #zotero-prefpane-zoteroSiYuan-template {
   width: 100%;
-  min-height: 12em;
+  min-height: 16em;
   font-family: monospace;
   font-size: 0.95em;
   line-height: 1.45;

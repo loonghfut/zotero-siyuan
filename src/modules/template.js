@@ -33,6 +33,8 @@ export const TEMPLATE_VARIABLES = [
 	{ name: "annotationType", group: "注释", hint: "highlight / underline / note" },
 	{ name: "annotationId", group: "注释", hint: "这条注释的唯一 key" },
 	{ name: "annotationTags", group: "注释", hint: "这条注释自己的标签" },
+	{ name: "image", group: "注释", hint: "框选注释的截图（Markdown 图片），没有则为空" },
+	{ name: "imageCallout", group: "注释", hint: "框选注释的截图，每行加 “> ”" },
 
 	// the item
 	{ name: "title", group: "文献", hint: "文献标题" },
@@ -77,10 +79,14 @@ export const TEMPLATE_VARIABLES = [
 /**
  * The template used until the user writes their own: the same shape the
  * plugin produced before templates existed.
+ *
+ * The picture of a "框选" annotation sits on the same line as the quote:
+ * a "框选" annotation has no text of its own, so only one of the two is
+ * ever filled — and a line of its own would break the callout apart.
  */
 export const DEFAULT_TEMPLATE = [
 	"> [!quote] 摘录 · {{title}}",
-	"{{quoteCallout}}",
+	"{{imageCallout}}{{quoteCallout}}",
 	"",
 	"{{#if comment}}> [!note] 批注",
 	"{{commentCallout}}",
@@ -236,3 +242,149 @@ export function templateVariables(template) {
 	}
 	return names;
 }
+
+/**
+ * The names of the variables that exist.
+ * @returns {String[]}
+ */
+export function knownVariableNames() {
+	return TEMPLATE_VARIABLES.map((variable) => variable.name);
+}
+
+/**
+ * Check a template before it is used.
+ *
+ * Two things go wrong in a template that is typed by hand: a variable
+ * that does not exist (it is simply left out of the note), and a
+ * conditional that is never closed (the rest of the template is thrown
+ * away). Both are found here, while the user is still typing.
+ *
+ * @param {String} template
+ * @returns {{unknown: String[], unbalanced: Number, problems: String[]}}
+ */
+export function validateTemplate(template) {
+	const text = String(template == null ? "" : template);
+	const known = new Set(knownVariableNames());
+	const unknown = [];
+	const problems = [];
+
+	for (const name of templateVariables(text)) {
+		if (!known.has(name) && !unknown.includes(name)) {
+			unknown.push(name);
+		}
+	}
+
+	// Count the conditionals that are opened and closed. The engine
+	// pairs them with brackets, so a missing `{{/if}}` swallows the rest
+	// of the template — worth saying out loud.
+	let depth = 0;
+	let lowest = 0;
+	for (const match of text.matchAll(/\{\{#if\s+[A-Za-z][A-Za-z0-9]*\s*\}\}|\{\{\/if\}\}/g)) {
+		if (match[0].startsWith("{{#if")) {
+			depth++;
+		}
+		else {
+			depth--;
+			lowest = Math.min(lowest, depth);
+		}
+	}
+	const unbalanced = depth > 0 ? depth : -lowest;
+
+	if (unknown.length) {
+		problems.push(`unknown variables: ${unknown.join(", ")}`);
+	}
+	if (unbalanced > 0) {
+		problems.push(
+			`${unbalanced} conditional${unbalanced > 1 ? "s are" : " is"} not closed`,
+		);
+	}
+	else if (unbalanced < 0) {
+		problems.push("there is a {{/if}} without a {{#if}}");
+	}
+
+	return { unknown, unbalanced, problems };
+}
+
+/**
+ * Make sure the picture of an area selection ends up in the note.
+ *
+ * A "框选" annotation has no text: what the user selected is the
+ * picture. A template that was written before the picture existed does
+ * not mention it — and the selection would simply be lost.
+ *
+ * So the picture is appended when the template did not ask for it. A
+ * template that *does* ask for it (`{{image}}` or `{{imageCallout}}`)
+ * keeps it exactly where it put it.
+ *
+ * @param {String} text - the rendered Markdown
+ * @param {String} image - the Markdown of the picture, or ""
+ * @returns {String}
+ */
+export function appendPicture(text, image) {
+	const picture = String(image || "").trim();
+	if (!picture) {
+		return text;
+	}
+	if (String(text || "").includes(picture)) {
+		// The template has it already.
+		return text;
+	}
+	const body = String(text || "").replace(/\s+$/, "");
+	return body ? `${body}\n\n${picture}\n` : `${picture}\n`;
+}
+
+/**
+ * Templates that are ready to use.
+ *
+ * Writing a template from scratch is the hardest part of using the
+ * plugin — these are the shapes most people want, so they can start
+ * from one of them and change what they need.
+ */
+export const TEMPLATE_PRESETS = [
+	{
+		id: "default",
+		name: "默认：摘录 + 批注 + 元信息",
+		template: DEFAULT_TEMPLATE,
+	},
+	{
+		id: "minimal",
+		name: "极简：只有摘录和回链",
+		template: [
+			"> {{quoteInline}}",
+			"",
+			"[{{title}}]({{zoteroAnnotationLink}})",
+		].join("\n"),
+	},
+	{
+		id: "picture",
+		name: "框选图片单独一行",
+		template: [
+			"> [!quote] 摘录 · {{title}}",
+			"{{imageCallout}}{{quoteCallout}}",
+			"",
+			"{{#if comment}}> [!note] 批注",
+			"{{commentCallout}}",
+			"",
+			"{{/if}}{{metadata}}",
+		].join("\n"),
+	},
+	{
+		id: "full",
+		name: "全文笔记：摘要 + 标签 + 时间",
+		template: [
+			"> [!quote] 摘录 · {{title}}",
+			"{{imageCallout}}{{quoteCallout}}",
+			"",
+			"{{#if comment}}> [!note] 批注",
+			"{{commentCallout}}",
+			"",
+			"{{/if}}{{#if abstract}}> [!abstract] 摘要",
+			"{{abstract}}",
+			"",
+			"{{/if}}{{metadata}}",
+			"{{#if tags}}标签：{{tags}}",
+			"",
+			"{{/if}}发送于 {{timestamp}}",
+		].join("\n"),
+	},
+];

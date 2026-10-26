@@ -19,6 +19,17 @@ import { SiYuanHTTP } from "./modules/siyuan-http.js";
 import { collectMetadata, siyuanBlockLink } from "./modules/metadata.js";
 import { SiYuanIndex } from "./modules/siyuan-index.js";
 import {
+  annotationImageDataURL,
+  annotationImagePath,
+  cacheImagePath,
+  exportPicture,
+  findPicture,
+  isPictureAnnotation,
+  pictureMarkdown,
+  pictureName,
+  removePicture,
+} from "./modules/siyuan-image.js";
+import {
 	launchExternally,
 	suppressProtocolWarning,
 } from "./modules/siyuan-launcher.js";
@@ -26,11 +37,18 @@ import { createSiyuanIcon } from "./modules/icons.js";
 import { showToast } from "./modules/toast.js";
 import {
 	DEFAULT_TEMPLATE,
+	TEMPLATE_PRESETS,
 	TEMPLATE_VARIABLES,
+	appendPicture,
 	renderTemplate,
 	templateVariables,
+	validateTemplate,
 } from "./modules/template.js";
-import { insertToken, variableToken } from "./modules/template-edit.js";
+import {
+	insertToken,
+	insertVariable,
+	variableToken,
+} from "./modules/template-edit.js";
 import { runDiagnostics } from "./modules/diagnostics.js";
 import { runSelfTest } from "./modules/selftest.js";
 import { getPref, setPref } from "./utils/prefs.js";
@@ -84,6 +102,18 @@ class ZoteroSiYuanAddon {
     // hooks here right before it clicks, and the click picks them up. A
     // click that carries no hooks — every real one — is never affected.
     this._pendingSendHooks = null;
+    // The picture of the annotation that is being sent right now, and where
+    // it was put. A send that never reaches SiYuan has to take it back —
+    // the workspace belongs to the user.
+    this._pendingPicture = null;
+    // The SiYuan workspace the notes go into, and the HTTP fallback
+    // client. Both are looked up once and kept — every lookup of the
+    // client authenticates against the kernel, and the kernel counts the
+    // failed attempts.
+    this._workspaceDir = "";
+    this._workspaceKey = null;
+    this._http = null;
+    this._httpKey = null;
     // The document of every reader that has rendered a sidebar. The reader
     // event for the context menu does not carry the document, so it is
     // remembered here while the sidebar renders.
@@ -813,7 +843,19 @@ class ZoteroSiYuanAddon {
     if (hooks && hooks.notebook) {
       hooks.notebook(notebook);
     }
-    const sent = (await this._append(notebook.id, markdown, hooks)) || {};
+    let sent;
+    try {
+      sent = (await this._append(notebook.id, markdown, hooks)) || {};
+    }
+    catch (e) {
+      // The note never reached SiYuan — the picture that came with it has
+      // to go back, or the workspace keeps a picture nobody refers to.
+      await this._dropPicture();
+      throw e;
+    }
+    // The note is in SiYuan, so the picture that came with it belongs to
+    // the note now.
+    this._pendingPicture = null;
     // `_append` answers with an object; accept a plain string too, so a
     // change there cannot silently lose the block id.
     const transport = typeof sent === "string" ? sent : sent.transport;
@@ -927,6 +969,10 @@ class ZoteroSiYuanAddon {
       authorName: item.annotationAuthorName || "",
       position,
       tags: (item.getTags() || []).map((t) => ({ name: t.tag })),
+      // The picture of a "框选" annotation. It is looked up here, while the
+      // item is at hand: the item knows which library it belongs to, and
+      // that is what the cache path is built from.
+      imagePath: annotationImagePath(item),
     };
   }
 
@@ -958,9 +1004,33 @@ class ZoteroSiYuanAddon {
     return insertToken(text, token, start, end);
   }
 
+  /**
+   * Insert a variable into the template, keeping it readable.
+   *
+   * A callout has to start a line of its own, and the indentation of the
+   * line it lands on is kept.
+   */
+  insertVariable(text, token, start, end) {
+    return insertVariable(text, token, start, end);
+  }
+
   /** The token of a template variable. */
   variableToken(name) {
     return variableToken(name);
+  }
+
+  /** The templates that are ready to use. */
+  getTemplatePresets() {
+    return TEMPLATE_PRESETS.map((preset) => ({
+      id: preset.id,
+      name: preset.name,
+      template: preset.template,
+    }));
+  }
+
+  /** What is wrong with a template, if anything. */
+  checkTemplate(template) {
+    return validateTemplate(template);
   }
 
   /** The template in use — the user's, or the built-in default. */
@@ -1066,7 +1136,7 @@ class ZoteroSiYuanAddon {
         `ZoteroSiYuan: the CLI could not resolve the notebook (${cliError.message}); trying the HTTP API`,
       );
       try {
-        const http = await SiYuanHTTP.discover(getPref("workspace", ""));
+        const http = await this._httpClient();
         return await http.resolveNotebook(wanted);
       }
       catch (httpError) {
@@ -1114,7 +1184,7 @@ class ZoteroSiYuanAddon {
         `ZoteroSiYuan: the CLI could not write (${cliError.message}); trying the HTTP API`,
       );
       try {
-        const http = await SiYuanHTTP.discover(getPref("workspace", ""));
+        const http = await this._httpClient();
         const blockID = await http.appendDailyNote(notebookID, markdown);
         return {
           transport: "the SiYuan HTTP API",
@@ -1188,13 +1258,47 @@ class ZoteroSiYuanAddon {
       if (/^\d+$/.test(String(id))) {
         return await Zotero.Items.getAsync(Number(id));
       }
-      return await Zotero.Items.getByLibraryAndKeyAsync(
+      const key = String(id);
+      const item = await Zotero.Items.getByLibraryAndKeyAsync(
         Zotero.Libraries.userLibraryID,
-        String(id),
+        key,
       );
+      if (item) {
+        return item;
+      }
+      // The annotation may live in a group library — looking it up in
+      // "My Library" alone would miss it, and with it the picture.
+      for (const library of this._groupLibraries()) {
+        try {
+          const found = await Zotero.Items.getByLibraryAndKeyAsync(
+            library.libraryID,
+            key,
+          );
+          if (found) {
+            return found;
+          }
+        }
+        catch (e) {
+          // The library may not be loaded — try the next one.
+        }
+      }
+      return null;
     }
     catch (e) {
       return null;
+    }
+  }
+
+  /** The group libraries, when Zotero knows about any. */
+  _groupLibraries() {
+    try {
+      return (Zotero.Libraries.getAll() || []).filter(
+        (library) =>
+          library.libraryID !== Zotero.Libraries.userLibraryID,
+      );
+    }
+    catch (e) {
+      return [];
     }
   }
 
@@ -1345,11 +1449,15 @@ class ZoteroSiYuanAddon {
     const parentItem = await this._getParentItem(reader, hooks);
     const attachment = await this._getAttachment(reader);
     const annotationKey = await this._resolveAnnotationKey(annotation);
+    // A "框选" annotation has no text — the selection is a picture, and
+    // the picture is put into the workspace before the note is written.
+    const image = await this._preparePicture(annotation);
     const vars = collectMetadata({
       annotation,
       parentItem,
       attachment,
       annotationKey,
+      image,
       extra: this._now(),
     });
     const { text, unknown } = renderTemplate(this.getTemplate(), vars);
@@ -1358,7 +1466,268 @@ class ZoteroSiYuanAddon {
         `ZoteroSiYuan: the template uses variables that do not exist: ${unknown.join(", ")}`,
       );
     }
-    return text;
+    return appendPicture(text, image);
+  }
+
+  /**
+   * The picture of an area selection, ready to be put into the workspace.
+   *
+   * Zotero keeps the cropped picture in its cache; the reader also hands
+   * it over as a data URL. The cache file is used when it is there — it
+   * can be copied byte for byte — and the data URL is the fallback.
+   *
+   * A picture that cannot be found is not an error: the note is still
+   * written, only without the picture. A missing picture must never cost
+   * the user their comment.
+   *
+   * @param {Object} annotation - the reader's annotation model
+   * @returns {Promise<String>} the Markdown of the picture, or ""
+   */
+  async _preparePicture(annotation) {
+    // Every send starts without a picture; only a "框选" annotation gets
+    // one, and a stale one from an earlier send must not be mistaken for
+    // this send's picture.
+    this._pendingPicture = null;
+    // Every step of the chain, written down. When a picture does not
+    // arrive, this is where the answer is — a failure that says nothing
+    // is the hardest kind to find.
+    const trace = {
+      isPicture: false,
+      key: "",
+      cachePath: "",
+      cached: false,
+      dataURL: false,
+      workspace: "",
+      exported: "",
+      error: "",
+    };
+    this._lastPictureTrace = trace;
+
+    if (!isPictureAnnotation(annotation)) {
+      return "";
+    }
+    trace.isPicture = true;
+    const alt = getString("zoteroSiYuan-image-alt", "框选");
+    const key = await this._resolveAnnotationKey(annotation);
+    trace.key = key;
+    if (!key) {
+      trace.error = "the annotation has no key";
+      Zotero.debug(
+        "ZoteroSiYuan: the annotation has no key — the picture cannot be found",
+      );
+      return "";
+    }
+
+    // The cache file — the canonical copy.
+    let source = null;
+    let path = annotation.imagePath || "";
+    if (!path) {
+      // Most annotations live in "My Library", and their picture sits in a
+      // folder that can be named without looking the item up at all.
+      path = await findPicture(key, Zotero.Libraries.userLibraryID);
+      trace.cachePath = path;
+      trace.cached = !!path;
+    }
+    if (!path) {
+      // A group library keeps its pictures in a folder of its own.
+      const item = await this._getAnnotationItem({ id: key });
+      if (item) {
+        path = await annotationImagePath(item);
+        trace.cachePath = path;
+        trace.cached = !!path;
+      }
+    }
+    if (path) {
+      source = { path };
+    }
+    if (!source) {
+      // The reader's own copy — the picture that came in with a sync.
+      const dataURL = annotationImageDataURL(annotation);
+      trace.dataURL = !!dataURL;
+      if (dataURL) {
+        source = { dataURL };
+      }
+    }
+    if (!source) {
+      trace.error = "no picture in the cache and none in the reader";
+      Zotero.debug(
+        "ZoteroSiYuan: the annotation has no picture to send — the cache file is missing",
+      );
+      return "";
+    }
+
+    const workspace = await this._resolveWorkspaceDir();
+    trace.workspace = workspace;
+    if (!workspace) {
+      trace.error = "the SiYuan workspace is unknown";
+      Zotero.debug(
+        "ZoteroSiYuan: the SiYuan workspace is unknown — the picture cannot be placed",
+      );
+      return "";
+    }
+
+    try {
+      const { asset, file } = await exportPicture(
+        workspace,
+        source,
+        pictureName(key),
+      );
+      if (!asset) {
+        trace.error = "the picture could not be placed";
+        return "";
+      }
+      trace.exported = asset;
+      // Remember where the picture went: a send that never reaches SiYuan
+      // has to take it back.
+      this._pendingPicture = { asset, file };
+      return pictureMarkdown(asset, alt);
+    }
+    catch (e) {
+      // The note is still worth writing without the picture.
+      trace.error = String(e && e.message ? e.message : e);
+      Zotero.logError(`ZoteroSiYuan: could not place the picture: ${e}`);
+      return "";
+    }
+  }
+
+  /**
+   * What the plugin can see of the area selections in the library.
+   *
+   * The picture of a "框选" annotation lives in Zotero's cache. This walks
+   * the library and reports what is really there — where the cache is,
+   * which path the picture would have, and whether the file is on disk.
+   * When a picture does not arrive, this is where the chain breaks.
+   *
+   * @returns {Promise<Object>} the report
+   */
+  async probePictures() {
+    const report = {
+      ok: false,
+      cacheDir: "",
+      workspace: "",
+      annotations: [],
+      error: "",
+    };
+    try {
+      report.cacheDir = Zotero.DataDirectory.getSubdirectory("cache");
+    }
+    catch (e) {
+      report.error = String(e && e.message ? e.message : e);
+    }
+    try {
+      report.workspace = await this._resolveWorkspaceDir();
+    }
+    catch (e) {
+      // The workspace is not needed to look at the cache.
+    }
+    try {
+      const rows = await Zotero.DB.queryAsync(
+        "SELECT itemID FROM itemAnnotations " +
+          "WHERE itemID NOT IN (SELECT itemID FROM deletedItems) " +
+          "ORDER BY itemID DESC LIMIT 200",
+      );
+      for (const row of rows || []) {
+        const item = await Zotero.Items.getAsync(row.itemID);
+        if (!item) {
+          continue;
+        }
+        const type = String(item.annotationType || "").toLowerCase();
+        if (!["image", "ink"].includes(type)) {
+          continue;
+        }
+        const path = cacheImagePath(item.libraryID, item.key);
+        let exists = false;
+        try {
+          exists = path ? await IOUtils.exists(path) : false;
+        }
+        catch (e) {
+          exists = false;
+        }
+        report.annotations.push({
+          key: item.key,
+          type,
+          libraryID: item.libraryID,
+          path,
+          exists,
+        });
+      }
+      report.ok = true;
+    }
+    catch (e) {
+      report.error = String(e && e.message ? e.message : e);
+    }
+    return report;
+  }
+
+  /**
+   * Take back the picture of a send that never happened.
+   *
+   * A "框选" annotation brings its picture along, and the picture has to
+   * be in the workspace before the note is written. When the write fails,
+   * the picture would stay behind — and a workspace that fills up with
+   * pictures no note refers to is litter.
+   */
+  async _dropPicture() {
+    const picture = this._pendingPicture;
+    this._pendingPicture = null;
+    if (!picture) {
+      return;
+    }
+    await removePicture(picture.file);
+  }
+
+  /**
+   * The SiYuan workspace the notes go into.
+   *
+   * The workspace holds the assets, so the picture has to be put there
+   * before the note is written.
+   *
+   * @returns {Promise<String>} the directory, or "" when it is unknown
+   */
+  async _resolveWorkspaceDir() {
+    const configured = getPref("workspace", "");
+    if (configured) {
+      return configured;
+    }
+    const key = configured;
+    if (this._workspaceKey !== key) {
+      this._workspaceKey = key;
+      this._workspaceDir = "";
+    }
+    if (this._workspaceDir) {
+      return this._workspaceDir;
+    }
+    try {
+      this._workspaceDir = await this.getCLI().currentWorkspace();
+    }
+    catch (e) {
+      // The CLI is not reachable — the HTTP API knows the workspace too.
+      try {
+        const http = await this._httpClient();
+        this._workspaceDir = http ? http.workspaceDir : "";
+      }
+      catch (e2) {
+        this._workspaceDir = "";
+      }
+    }
+    return this._workspaceDir;
+  }
+
+  /**
+   * The HTTP fallback client — discovered once and kept.
+   *
+   * Every discovery authenticates against the kernel, and the kernel
+   * counts the failed ones, so it is not done twice per send.
+   *
+   * @returns {Promise<SiYuanHTTP>}
+   */
+  async _httpClient() {
+    const key = getPref("workspace", "");
+    if (!this._http || this._httpKey !== key) {
+      this._http = await SiYuanHTTP.discover(key);
+      this._httpKey = key;
+    }
+    return this._http;
   }
 
   /**

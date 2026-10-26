@@ -200,6 +200,8 @@ function buildMetadataBlock(vars) {
  * @param {Object} options.parentItem - the item the annotation belongs to
  * @param {Object} options.attachment - the PDF attachment, if any
  * @param {String} options.annotationKey - the annotation's key
+ * @param {String} options.image - the Markdown of the picture, for an
+ *   annotation whose content is a picture (an area selection)
  * @param {Object} options.extra - { date, time, timestamp }
  * @returns {Object} the variables
  */
@@ -208,6 +210,7 @@ export function collectMetadata({
 	parentItem = null,
 	attachment = null,
 	annotationKey = "",
+	image = "",
 	extra = {},
 }) {
 	const quote = String(annotation.text || "").trim();
@@ -219,10 +222,19 @@ export function collectMetadata({
 	const annotator = annotation.authorName || "";
 	const authors = getCreatorList(parentItem);
 
+	// The picture of an area selection. It has a variable of its own, and
+	// the send puts it in even when the template does not mention it — the
+	// selection IS the content of a "框选" annotation, so it must not get
+	// lost just because the template never heard of it.
+	const picture = String(image || "").trim();
+
 	const vars = {
 		// --- the annotation -------------------------------------------
 		quote,
-		quoteCallout: toCalloutBody(quote),
+		// Only the text. The picture is not repeated here: a template that
+		// asks for both `{{imageCallout}}` and `{{quoteCallout}}` would
+		// show the picture twice.
+		quoteCallout: quote ? toCalloutBody(quote) : "",
 		quoteInline: escapeInline(quote),
 		comment,
 		commentCallout: toCalloutBody(comment),
@@ -234,6 +246,10 @@ export function collectMetadata({
 		annotationType: annotation.type || "",
 		annotationId: annotationKey || annotation.id || "",
 		annotationTags: tagNames(annotation.tags).join(", "),
+
+		// --- the picture ----------------------------------------------
+		image: picture,
+		imageCallout: picture ? toCalloutBody(picture) : "",
 
 		// --- the item --------------------------------------------------
 		title,

@@ -20,6 +20,7 @@
 var ZoteroSiYuanPreferences = {
   BUTTON_ID: "zotero-prefpane-zoteroSiYuan-test",
   SELFTEST_BUTTON_ID: "zotero-prefpane-zoteroSiYuan-selftest",
+  CHECK_PICTURES_ID: "zotero-prefpane-zoteroSiYuan-checkpictures",
   RESET_BUTTON_ID: "zotero-prefpane-zoteroSiYuan-reset-template",
   RESCAN_BUTTON_ID: "zotero-prefpane-zoteroSiYuan-rescan",
   TEMPLATE_ID: "zotero-prefpane-zoteroSiYuan-template",
@@ -27,8 +28,17 @@ var ZoteroSiYuanPreferences = {
   VARIABLES_ID: "zotero-prefpane-zoteroSiYuan-variables",
   STATUS_ID: "zotero-prefpane-zoteroSiYuan-template-status",
   RESULT_ID: "zotero-prefpane-zoteroSiYuan-result",
+  PRESET_ID: "zotero-prefpane-zoteroSiYuan-template-preset",
+  PRESET_APPLY_ID: "zotero-prefpane-zoteroSiYuan-template-preset-apply",
+  PROBLEMS_ID: "zotero-prefpane-zoteroSiYuan-template-problems",
+  FILTER_ID: "zotero-prefpane-zoteroSiYuan-variable-filter",
+  ONLY_USED_ID: "zotero-prefpane-zoteroSiYuan-variable-only-used",
 
   XHTML: "http://www.w3.org/1999/xhtml",
+
+  // Every variable the plugin knows about, and the ones the current
+  // template already uses.
+  _variables: [],
 
   init: function () {
     if (typeof document === "undefined") {
@@ -64,9 +74,17 @@ var ZoteroSiYuanPreferences = {
         e.preventDefault();
         this.selfTest();
       }
+      else if (target.id === this.CHECK_PICTURES_ID) {
+        e.preventDefault();
+        this.checkPictures();
+      }
       else if (target.id === this.RESET_BUTTON_ID) {
         e.preventDefault();
         this.resetTemplate();
+      }
+      else if (target.id === this.PRESET_APPLY_ID) {
+        e.preventDefault();
+        this.applyPreset();
       }
       else if (target.id === this.RESCAN_BUTTON_ID) {
         e.preventDefault();
@@ -76,9 +94,22 @@ var ZoteroSiYuanPreferences = {
 
     document.addEventListener("input", (e) => {
       var target = e.target;
-      if (target && target.id === this.TEMPLATE_ID) {
+      if (!target) {
+        return;
+      }
+      if (target.id === this.TEMPLATE_ID) {
         this._caret = target.selectionStart;
         this.onTemplateInput();
+      }
+      else if (target.id === this.FILTER_ID) {
+        this._renderVariables(this._filteredVariables());
+      }
+    });
+
+    document.addEventListener("change", (e) => {
+      var target = e.target;
+      if (target && target.id === this.ONLY_USED_ID) {
+        this._renderVariables(this._filteredVariables());
       }
     });
 
@@ -92,6 +123,20 @@ var ZoteroSiYuanPreferences = {
     });
 
     document.addEventListener("keydown", (e) => {
+      // Tab puts two spaces in, instead of jumping to the next control —
+      // the template is Markdown, and indentation matters in it.
+      if (e.key === "Tab" && e.target && e.target.id === this.TEMPLATE_ID) {
+        e.preventDefault();
+        var area = e.target;
+        var start = area.selectionStart;
+        var end = area.selectionEnd;
+        var result = this._insert(area.value, "  ", start, end);
+        area.value = result.value;
+        this._caret = result.caret;
+        this._focusCaret(area, result.caret);
+        this.onTemplateInput();
+        return;
+      }
       if (e.key !== "Enter" && e.key !== " ") {
         return;
       }
@@ -104,6 +149,39 @@ var ZoteroSiYuanPreferences = {
     });
 
     this._waitForPane();
+  },
+
+  /**
+   * Put a template that is ready to use into the editor.
+   *
+   * Writing a template from scratch is the hardest part of using the
+   * plugin, so the shapes most people want are one click away.
+   */
+  applyPreset: function () {
+    var addon = Zotero.ZoteroSiYuan;
+    var select = document.getElementById(this.PRESET_ID);
+    var area = document.getElementById(this.TEMPLATE_ID);
+    if (!addon || !select || !area) {
+      return;
+    }
+    var presets = addon.getTemplatePresets ? addon.getTemplatePresets() : [];
+    var chosen = null;
+    for (var i = 0; i < presets.length; i++) {
+      if (presets[i].id === select.value) {
+        chosen = presets[i];
+        break;
+      }
+    }
+    if (!chosen) {
+      return;
+    }
+    area.value = chosen.template;
+    this._caret = area.value.length;
+    this.onTemplateInput();
+    this._setStatus(
+      this._text("zoteroSiYuan-pref-preset-applied", "Template replaced"),
+      false,
+    );
   },
 
   /**
@@ -157,26 +235,45 @@ var ZoteroSiYuanPreferences = {
       start = area.value.length;
     }
 
-    var result = addon.insertToken(area.value, token, start, end);
+    // A callout has to start a line of its own, and the indentation of the
+    // line it lands on is kept — so the template stays readable.
+    var result = addon.insertVariable
+      ? addon.insertVariable(area.value, token, start, end)
+      : addon.insertToken(area.value, token, start, end);
     area.value = result.value;
     this._caret = result.caret;
 
     // Take the focus back, so several variables can be inserted in a row.
+    this._focusCaret(area, result.caret);
+
+    // Let the pane know the template changed, so it is saved and previewed.
+    this._fireInput(area, token);
+
+    this._setStatus(
+      this._text("zoteroSiYuan-pref-inserted", "Inserted ") + token,
+      false,
+    );
+  },
+
+  /** Put the caret somewhere and keep the focus in the editor. */
+  _focusCaret: function (area, caret) {
     try {
       area.focus();
-      area.setSelectionRange(result.caret, result.caret);
+      area.setSelectionRange(caret, caret);
     }
     catch (e) {
       // focus is a nicety, not a requirement
     }
+  },
 
-    // Let the pane know the template changed, so it is saved and previewed.
+  /** Tell the pane that the template changed. */
+  _fireInput: function (area, data) {
     var event;
     try {
       event = new InputEvent("input", {
         bubbles: true,
         inputType: "insertText",
-        data: token,
+        data: data || "",
       });
     }
     catch (e) {
@@ -184,11 +281,18 @@ var ZoteroSiYuanPreferences = {
       event.initEvent("input", true, false);
     }
     area.dispatchEvent(event);
+  },
 
-    this._setStatus(
-      this._text("zoteroSiYuan-pref-inserted", "Inserted ") + token,
-      false,
-    );
+  /** The plain insertion, used for the Tab key. */
+  _insert: function (text, token, start, end) {
+    var addon = Zotero.ZoteroSiYuan;
+    if (addon && addon.insertToken) {
+      return addon.insertToken(text, token, start, end);
+    }
+    return {
+      value: text.slice(0, start) + token + text.slice(end),
+      caret: start + token.length,
+    };
   },
 
   /** Wait for the pane's fragment to be inserted into the document. */
@@ -217,7 +321,10 @@ var ZoteroSiYuanPreferences = {
     if (area) {
       area.value = help.template;
     }
-    this._renderVariables(help.variables);
+    this._variables = help.variables || [];
+    this._renderPresets();
+    this._renderVariables(this._filteredVariables());
+    this._showProblems(help.template);
     this._refreshPreview();
   },
 
@@ -231,7 +338,80 @@ var ZoteroSiYuanPreferences = {
     }
     addon.setTemplate(area.value);
     this._setStatus(this._text("zoteroSiYuan-pref-template-saved", "Saved"), false);
+    this._showProblems(area.value);
     this._schedulePreview();
+  },
+
+  /**
+   * Say what is wrong with the template, if anything.
+   *
+   * A variable that does not exist is simply left out of the note, and a
+   * conditional that is never closed swallows the rest of the template.
+   * Both are worth saying while the user is still typing.
+   */
+  _showProblems: function (template) {
+    var box = document.getElementById(this.PROBLEMS_ID);
+    if (!box) {
+      return;
+    }
+    var addon = Zotero.ZoteroSiYuan;
+    var result =
+      addon && addon.checkTemplate
+        ? addon.checkTemplate(template)
+        : { problems: [] };
+    box.textContent = "";
+    if (!result.problems || !result.problems.length) {
+      box.style.display = "none";
+      return;
+    }
+    box.style.display = "block";
+    for (var i = 0; i < result.problems.length; i++) {
+      var line = document.createElementNS(this.XHTML, "div");
+      line.textContent = result.problems[i];
+      box.appendChild(line);
+    }
+  },
+
+  /** Fill the list of ready-made templates. */
+  _renderPresets: function () {
+    var select = document.getElementById(this.PRESET_ID);
+    var addon = Zotero.ZoteroSiYuan;
+    if (!select || !addon || !addon.getTemplatePresets) {
+      return;
+    }
+    var presets = addon.getTemplatePresets();
+    select.textContent = "";
+    for (var i = 0; i < presets.length; i++) {
+      var option = document.createElementNS(this.XHTML, "option");
+      option.value = presets[i].id;
+      option.textContent = presets[i].name;
+      select.appendChild(option);
+    }
+  },
+
+  /**
+   * The variables the list shows: the ones that match what was typed, and
+   * — when that is asked for — only the ones the template already uses.
+   */
+  _filteredVariables: function () {
+    var filterBox = document.getElementById(this.FILTER_ID);
+    var filter = filterBox ? String(filterBox.value || "").trim().toLowerCase() : "";
+    var onlyUsedBox = document.getElementById(this.ONLY_USED_ID);
+    var onlyUsed = onlyUsedBox ? !!onlyUsedBox.checked : false;
+    if (!filter && !onlyUsed) {
+      return this._variables;
+    }
+    return this._variables.filter(function (variable) {
+      if (onlyUsed && !variable.used) {
+        return false;
+      }
+      if (!filter) {
+        return true;
+      }
+      var haystack =
+        variable.name.toLowerCase() + " " + (variable.hint || "").toLowerCase();
+      return haystack.indexOf(filter) !== -1;
+    });
   },
 
   resetTemplate: function () {
@@ -317,6 +497,16 @@ var ZoteroSiYuanPreferences = {
       return;
     }
     box.textContent = "";
+    if (!variables || !variables.length) {
+      var empty = document.createElementNS(this.XHTML, "p");
+      empty.className = "zotero-siyuan-hint";
+      empty.textContent = this._text(
+        "zoteroSiYuan-pref-variables-empty",
+        "No variable matches.",
+      );
+      box.appendChild(empty);
+      return;
+    }
     var table = document.createElementNS(this.XHTML, "table");
     var body = document.createElementNS(this.XHTML, "tbody");
 
@@ -412,6 +602,71 @@ var ZoteroSiYuanPreferences = {
       // fall through
     }
     return fallback;
+  },
+
+  /**
+   * Look at the area selections in the library and report where their
+   * pictures are.
+   *
+   * The picture of a "框选" annotation lives in Zotero's cache. When a
+   * picture does not arrive, this is where the chain breaks — and this is
+   * the button that shows it.
+   */
+  checkPictures: async function () {
+    this._setResult(
+      this._text("zoteroSiYuan-pref-checkingpictures", "Looking for area selections…"),
+      false,
+    );
+    try {
+      if (!Zotero.ZoteroSiYuan || !Zotero.ZoteroSiYuan.probePictures) {
+        throw new Error(
+          "The plugin is not running. Restart Zotero and try again.",
+        );
+      }
+      var report = await Zotero.ZoteroSiYuan.probePictures();
+      if (report.error) {
+        throw new Error(report.error);
+      }
+      var total = report.annotations.length;
+      var missing = report.annotations.filter(function (a) {
+        return !a.exists;
+      });
+      var text =
+        this._text("zoteroSiYuan-pref-pictures-found", "Area selections: ") +
+        total +
+        "  |  " +
+        this._text("zoteroSiYuan-pref-pictures-missing", "missing: ") +
+        missing.length +
+        "  |  " +
+        (report.cacheDir || "?");
+      if (total && !missing.length) {
+        this._setResult(text, false);
+      }
+      else if (!total) {
+        this._setResult(
+          this._text(
+            "zoteroSiYuan-pref-pictures-none",
+            "The library has no area selection.",
+          ),
+          false,
+        );
+      }
+      else {
+        this._setResult(
+          text +
+            "  |  " +
+            missing
+              .map(function (a) {
+                return a.key + " (" + (a.path || "no path") + ")";
+              })
+              .join(", "),
+          true,
+        );
+      }
+    }
+    catch (e) {
+      this._setResult(e.message, true);
+    }
   },
 
   /**

@@ -3,6 +3,7 @@ done = 已发送到思源笔记
 failed = 失败
 busy = 正在发送…
 busy-hint = 请等它发完。
+image-alt = 框选
 sent-title = 已发送到思源笔记 — 点击打开对应的块
 toast-title = 已发送到思源笔记
 toast-open = 在思源中打开

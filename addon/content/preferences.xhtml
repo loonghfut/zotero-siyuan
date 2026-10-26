@@ -57,6 +57,10 @@
       data-l10n-id="pref-selftest"
     ></html:button>
     <html:button
+      id="zotero-prefpane-__addonRef__-checkpictures"
+      data-l10n-id="pref-checkpictures"
+    ></html:button>
+    <html:button
       id="zotero-prefpane-__addonRef__-rescan"
       data-l10n-id="pref-rescan"
     ></html:button>
@@ -67,6 +71,17 @@
 
 <groupbox>
   <label><html:h2 data-l10n-id="pref-template-title"></html:h2></label>
+
+  <hbox class="zotero-siyuan-template-head">
+    <html:label data-l10n-id="pref-template-preset"></html:label>
+    <html:select
+      id="zotero-prefpane-__addonRef__-template-preset"
+    ></html:select>
+    <html:button
+      id="zotero-prefpane-__addonRef__-template-preset-apply"
+      data-l10n-id="pref-template-preset-apply"
+    ></html:button>
+  </hbox>
 
   <hbox class="zotero-siyuan-template-head">
     <html:label data-l10n-id="pref-template"></html:label>
@@ -80,9 +95,14 @@
     ></html:span>
   </hbox>
 
+  <html:div
+    id="zotero-prefpane-__addonRef__-template-problems"
+    class="zotero-siyuan-problems"
+  ></html:div>
+
   <html:textarea
     id="zotero-prefpane-__addonRef__-template"
-    rows="12"
+    rows="16"
     spellcheck="false"
   ></html:textarea>
 
@@ -92,7 +112,22 @@
     class="zotero-siyuan-preview"
   ></html:pre>
 
-  <html:label data-l10n-id="pref-variables"></html:label>
+  <hbox class="zotero-siyuan-template-head">
+    <html:label data-l10n-id="pref-variables"></html:label>
+    <html:input
+      id="zotero-prefpane-__addonRef__-variable-filter"
+      type="search"
+      data-l10n-id="pref-variables-filter"
+    ></html:input>
+    <html:label
+      for="zotero-prefpane-__addonRef__-variable-only-used"
+      data-l10n-id="pref-variables-only-used"
+    ></html:label>
+    <html:input
+      id="zotero-prefpane-__addonRef__-variable-only-used"
+      type="checkbox"
+    ></html:input>
+  </hbox>
   <html:div
     id="zotero-prefpane-__addonRef__-variables"
     class="zotero-siyuan-variables"
