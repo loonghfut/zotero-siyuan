@@ -1,7 +1,7 @@
 {
   "name": "zotero-siyuan",
   "type": "module",
-  "version": "0.2.93",
+  "version": "0.2.94",
   "description": "Send a Zotero PDF reader annotation and its comment to your SiYuan daily note.",
   "config": {
     "addonName": "Zotero to SiYuan",
@@ -12,10 +12,10 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/steve/zotero-siyuan.git"
+    "url": "git+https://github.com/loonghfut/zotero-siyuan.git"
   },
-  "author": "steve",
-  "homepage": "https://github.com/steve/zotero-siyuan",
+  "author": "loonghfut",
+  "homepage": "https://github.com/loonghfut/zotero-siyuan",
   "license": "AGPL-3.0-or-later",
   "scripts": {
     "build": "node tools/bump-version.mjs && zotero-plugin build && node tools/sync-xpi.mjs",

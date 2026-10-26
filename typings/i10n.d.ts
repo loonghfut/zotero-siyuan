@@ -76,6 +76,7 @@ export type FluentMessageId =
   | 'toast-batch-retry'
   | 'toast-batch-sent'
   | 'toast-batch-title'
+  | 'toast-close'
   | 'toast-missing-annotation'
   | 'toast-open'
   | 'toast-title';

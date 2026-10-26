@@ -346,7 +346,7 @@ siyuan dailynote create --notebook <笔记本 ID> -w <工作空间>
 
 # 2. 把这条笔记追加进日记，并拿到它写出来的块 ID
 siyuan block append --parent <日记文档 ID> --file <临时 md> -w <工作空间> -f json
-# → { "id": "20261026173312-7zsvcqk" }
+# → { "id": "20260101000000-abcdefg" }
 ```
 
 为什么不是一条 `dailynote append`：
@@ -589,8 +589,8 @@ renderSidebarAnnotationHeader 事件 → 真的按钮 → 真的 click()
 清理自检留下的块：
 
 ```bash
-node tools/siyuan-cleanup.mjs --workspace "D:\siyi" --list
-node tools/siyuan-cleanup.mjs --workspace "D:\siyi" --marker ZoteroSiYuanSelfTest
+node tools/siyuan-cleanup.mjs --workspace "D:\SiYuan\workspace" --list
+node tools/siyuan-cleanup.mjs --workspace "D:\SiYuan\workspace" --marker ZoteroSiYuanSelfTest
 ```
 
 ## 安装
@@ -647,7 +647,7 @@ node tools/siyuan-cleanup.mjs --workspace "D:\siyi" --marker ZoteroSiYuanSelfTes
 ```powershell
 siyuan workspace list
 siyuan workspace info
-siyuan notebook list -w "D:\siyi"
+siyuan notebook list -w "D:\SiYuan\workspace"
 ```
 
 ## 已知限制
@@ -675,15 +675,15 @@ siyuan notebook list -w "D:\siyi"
 
 | 环节 | 状态 |
 |---|---|
-| 按钮出现在阅读器侧边注释面板 | ✅ 你在 16:41 截图里点到了它 |
-| 点击事件到达 handler | ✅ 你在 16:41 截图里点到了它 |
+| 按钮出现在阅读器侧边注释面板 | ✅ 在阅读器侧栏点到了它 |
+| 点击事件到达 handler | ✅ 在阅读器侧栏点到了它 |
 | `this._send` 可用（handler 已 bind） | ✅ 自检里按钮的 click 走到了 `_send` |
 | `siyuan` 命令行定位与启动 | ✅ 插件在 Zotero 内解析出 `…\AppData\Local\Programs\SiYuan\…\siyuan.exe` |
-| 模板渲染 | ✅ 用了你库里的真实条目（LSENBHMQ），含作者/年份/出处/页码/精确深链 |
-| 笔记本解析 | ✅ `我的笔记本 (20261016230030-nvb0bgg)` |
+| 模板渲染 | ✅ 用了你库里的真实条目（ABCD1234），含作者/年份/出处/页码/精确深链 |
+| 笔记本解析 | ✅ `我的笔记本 (20260101000000-abcdefg)` |
 | `siyuan dailynote append --notebook --file -w` 真实写入 | ✅ **在真实 Zotero 里点自己那个按钮写入成功** |
 | 写入结果回读 | ✅ 思源日记「2026-10-25」里出现 1 个 quote callout + 1 个 note callout + 1 个元信息段落 |
-| 新块 ID 定位 | ✅ `siyuan sql` 查到 `20261025202330-bbw9ucw` |
+| 新块 ID 定位 | ✅ `siyuan sql` 查到 `20260101000000-bbbbbbb` |
 | 「已发送」索引 | ✅ 启动时扫到 4 个块、索引 3 条注释（同一条发两次自动去重）；刚发的即时入索引 |
 | 已发送标记渲染 | ✅ 注释旁出现 ↗（思源图标），指向 `siyuan://blocks/<块ID>` |
 | 发送后立刻出现标记 | ✅ 不重开论文，标记直接补到已渲染的侧边栏上 |

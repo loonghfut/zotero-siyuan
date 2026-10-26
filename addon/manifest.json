@@ -1,10 +1,10 @@
 {
   "manifest_version": 2,
   "name": "Zotero to SiYuan",
-  "version": "0.2.93",
+  "version": "0.2.94",
   "description": "Send a Zotero PDF reader annotation and its comment to your SiYuan daily note.",
-  "author": "steve",
-  "homepage_url": "https://github.com/steve/zotero-siyuan",
+  "author": "loonghfut",
+  "homepage_url": "https://github.com/loonghfut/zotero-siyuan",
   "icons": {
     "48": "content/icons/favicon@0.5x.png",
     "96": "content/icons/favicon.png"
@@ -12,7 +12,7 @@
   "applications": {
     "zotero": {
       "id": "zotero-siyuan@example.com",
-      "update_url": "https://github.com/steve/zotero-siyuan/releases/download/release/update.json",
+      "update_url": "https://github.com/loonghfut/zotero-siyuan/releases/download/release/update.json",
       "strict_min_version": "7.0",
       "strict_max_version": "10.0.*"
     }

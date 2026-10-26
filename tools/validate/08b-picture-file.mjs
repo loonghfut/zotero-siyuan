@@ -93,8 +93,8 @@ section("Picture in the workspace");
   try {
     check(
       "the assets folder is the workspace's own",
-      assetsDir("D:/siyi").endsWith("data/assets"),
-      assetsDir("D:/siyi"),
+      assetsDir("D:/workspace").endsWith("data/assets"),
+      assetsDir("D:/workspace"),
     );
 
     // The assets folder is normally already there — and the real
@@ -135,7 +135,7 @@ section("Picture in the workspace");
     let copyError = "";
     try {
       copied = await exportPicture(
-        "D:/siyi",
+        "D:/workspace",
         { path: "C:/zotero/cache/library/ABCD1234.png" },
         "zotero-siyuan-ABCD1234-20261026130000",
       );
@@ -148,8 +148,8 @@ section("Picture in the workspace");
       copyError === "" &&
         copied.asset === "assets/zotero-siyuan-ABCD1234-20261026130000.png" &&
         copied.file ===
-          "D:/siyi/data/assets/zotero-siyuan-ABCD1234-20261026130000.png" &&
-        disk.get("D:/siyi/data/assets/zotero-siyuan-ABCD1234-20261026130000.png") ===
+          "D:/workspace/data/assets/zotero-siyuan-ABCD1234-20261026130000.png" &&
+        disk.get("D:/workspace/data/assets/zotero-siyuan-ABCD1234-20261026130000.png") ===
           bytes,
       copyError || copied.asset,
     );
@@ -159,7 +159,7 @@ section("Picture in the workspace");
     let writeError = "";
     try {
       written = await exportPicture(
-        "D:/siyi",
+        "D:/workspace",
         { dataURL },
         "zotero-siyuan-ABCD1234-20261026130000",
       );
@@ -168,7 +168,7 @@ section("Picture in the workspace");
       writeError = String(e && e.message ? e.message : e);
     }
     const writtenBytes = disk.get(
-      "D:/siyi/data/assets/zotero-siyuan-ABCD1234-20261026130000.png",
+      "D:/workspace/data/assets/zotero-siyuan-ABCD1234-20261026130000.png",
     );
     check(
       "a picture that only exists as a data URL is written out",
@@ -182,7 +182,7 @@ section("Picture in the workspace");
 
     check(
       "there is no picture, there is no path",
-      (await exportPicture("D:/siyi", null, "x")).asset === "",
+      (await exportPicture("D:/workspace", null, "x")).asset === "",
     );
 
     // --- the picture is compressed before it is sent --------------------
@@ -217,7 +217,7 @@ section("Picture in the workspace");
       // The stand-in for the compression: it answers with fewer bytes.
       const smaller = new Uint8Array([9, 9]);
       const compressed = await tryExport(
-        "D:/siyi",
+        "D:/workspace",
         { path: "C:/zotero/cache/library/ABCD1234.png" },
         "zotero-siyuan-COMP-20261026130000",
         {
@@ -235,14 +235,14 @@ section("Picture in the workspace");
           compressed.result.asset ===
             "assets/zotero-siyuan-COMP-20261026130000.jpg" &&
           compressed.result.compressed === true &&
-          disk.get("D:/siyi/data/assets/zotero-siyuan-COMP-20261026130000.jpg") ===
+          disk.get("D:/workspace/data/assets/zotero-siyuan-COMP-20261026130000.jpg") ===
             smaller,
         compressed.error || compressed.result.asset,
       );
 
       // A compression that does not help is not worth the trouble.
       const bigger = await tryExport(
-        "D:/siyi",
+        "D:/workspace",
         { path: "C:/zotero/cache/library/ABCD1234.png" },
         "zotero-siyuan-BIG-20261026130000",
         {
@@ -263,7 +263,7 @@ section("Picture in the workspace");
 
       // A compression that failed leaves the picture as it was.
       const failed = await tryExport(
-        "D:/siyi",
+        "D:/workspace",
         { path: "C:/zotero/cache/library/ABCD1234.png" },
         "zotero-siyuan-FAIL-20261026130000",
         { compressor: async () => null },
@@ -279,7 +279,7 @@ section("Picture in the workspace");
 
       // And the user may turn the compression off altogether.
       const off = await tryExport(
-        "D:/siyi",
+        "D:/workspace",
         { path: "C:/zotero/cache/library/ABCD1234.png" },
         "zotero-siyuan-OFF-20261026130000",
         {
@@ -320,13 +320,13 @@ section("Picture in the workspace");
         const big = new Uint8Array(777).fill(3);
         disk.set("C:/zotero/cache/library/MEMO0001.png", big);
         const first = await tryExport(
-          "D:/siyi",
+          "D:/workspace",
           { path: "C:/zotero/cache/library/MEMO0001.png" },
           "zotero-siyuan-MEMO-20261026130000",
           { compressor: stub, memo: true },
         );
         const again = await tryExport(
-          "D:/siyi",
+          "D:/workspace",
           { path: "C:/zotero/cache/library/MEMO0001.png" },
           "zotero-siyuan-MEMO2-20261026130000",
           { compressor: stub, memo: true },
@@ -344,7 +344,7 @@ section("Picture in the workspace");
             again.result.asset ===
               "assets/zotero-siyuan-MEMO2-20261026130000.jpg" &&
             disk.get(
-              "D:/siyi/data/assets/zotero-siyuan-MEMO2-20261026130000.jpg",
+              "D:/workspace/data/assets/zotero-siyuan-MEMO2-20261026130000.jpg",
             ).length === 120,
           again.error || again.result.asset,
         );
@@ -396,14 +396,14 @@ section("Picture in the workspace");
       let path = "";
       let error = "";
       try {
-        path = pictureFile("D:/siyi", "assets/a.png");
+        path = pictureFile("D:/workspace", "assets/a.png");
       }
       catch (e) {
         error = String(e && e.message ? e.message : e);
       }
       check(
         "the picture's real path is inside the workspace's assets",
-        error === "" && path === "D:/siyi/data/assets/a.png",
+        error === "" && path === "D:/workspace/data/assets/a.png",
         error || path,
       );
     }
@@ -415,10 +415,10 @@ section("Picture in the workspace");
         pictureAssetNames("nothing here").length === 0,
       pictureAssetNames("![a](assets/x.png) and ![b](assets/y.png)").join(","),
     );
-    await removePicture("D:/siyi/data/assets/zotero-siyuan-ABCD1234-20261026130000.png");
+    await removePicture("D:/workspace/data/assets/zotero-siyuan-ABCD1234-20261026130000.png");
     check(
       "a picture can be taken back out of the workspace",
-      !disk.has("D:/siyi/data/assets/zotero-siyuan-ABCD1234-20261026130000.png"),
+      !disk.has("D:/workspace/data/assets/zotero-siyuan-ABCD1234-20261026130000.png"),
     );
   }
   finally {

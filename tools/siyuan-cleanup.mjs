@@ -7,9 +7,9 @@
  * many of them, and the CLI authenticates without that risk.
  *
  * Usage:
- *   node tools/siyuan-cleanup.mjs --workspace D:\siyi --ids 2026...,2026...
- *   node tools/siyuan-cleanup.mjs --workspace D:\siyi --marker ZoteroSiYuanSelfTest
- *   node tools/siyuan-cleanup.mjs --workspace D:\siyi --list
+ *   node tools/siyuan-cleanup.mjs --workspace D:\SiYuan\workspace --ids 2026...,2026...
+ *   node tools/siyuan-cleanup.mjs --workspace D:\SiYuan\workspace --marker ZoteroSiYuanSelfTest
+ *   node tools/siyuan-cleanup.mjs --workspace D:\SiYuan\workspace --list
  */
 import { readFileSync, readdirSync, existsSync } from "node:fs";
 import { join } from "node:path";
