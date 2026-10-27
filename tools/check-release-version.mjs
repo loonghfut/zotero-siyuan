@@ -25,6 +25,7 @@ const pkg = JSON.parse(readFileSync(join(ROOT, "package.json"), "utf8"));
 const manifest = JSON.parse(
 	readFileSync(join(ROOT, "addon", "manifest.json"), "utf8"),
 );
+const lock = JSON.parse(readFileSync(join(ROOT, "package-lock.json"), "utf8"));
 
 const problems = [];
 if (tag !== `v${pkg.version}`) {
@@ -33,6 +34,25 @@ if (tag !== `v${pkg.version}`) {
 if (manifest.version !== pkg.version) {
 	problems.push(
 		`the manifest says ${manifest.version}, package.json says ${pkg.version}`,
+	);
+}
+
+/*
+ * The lock file names the version as well. `npm ci` compares it with
+ * package.json and refuses to install when the two differ — so a lock
+ * file that was left behind does not only look untidy, it breaks the
+ * build of the release itself.
+ */
+if (lock.version !== pkg.version) {
+	problems.push(
+		`package-lock.json says ${lock.version}, package.json says ${pkg.version}`,
+	);
+}
+if (lock.packages && lock.packages[""] &&
+	lock.packages[""].version !== pkg.version) {
+	problems.push(
+		`package-lock.json's root package says ` +
+			`${lock.packages[""].version}, package.json says ${pkg.version}`,
 	);
 }
 

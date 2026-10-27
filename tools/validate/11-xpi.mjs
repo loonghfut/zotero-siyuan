@@ -94,6 +94,28 @@ if (!existsSync(xpi)) {
         !!inCode && inCode[1] === manifest.version,
         inCode ? inCode[1] : "no version in the code",
       );
+      // The lock file names the version as well, and `npm ci` compares
+      // it with package.json: a lock file that was left behind makes the
+      // install step fail with a version mismatch. It did exactly that
+      // here — the lock file sat at 0.2.54 while everything else was at
+      // 0.2.95 — so the fourth place is checked as well.
+      const lock = JSON.parse(
+        readFileSync(join(ROOT, "package-lock.json"), "utf8"),
+      );
+      check(
+        "the lock file's version matches package.json",
+        lock.version === pkg.version,
+        `lock ${lock.version} vs package ${pkg.version}`,
+      );
+      check(
+        "the lock file's root package matches package.json",
+        !!lock.packages &&
+          !!lock.packages[""] &&
+          lock.packages[""].version === pkg.version,
+        lock.packages && lock.packages[""]
+          ? lock.packages[""].version
+          : "no root package in the lock file",
+      );
     }
   } else {
     check("manifest.json readable from the XPI", false);

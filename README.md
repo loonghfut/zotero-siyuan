@@ -575,7 +575,7 @@ npm run ci        # build:ci + check
 | 流水线 | 什么时候跑 | 做什么 |
 |---|---|---|
 | `ci.yml` | 推 `main`、提 PR、手动触发 | Ubuntu + Windows 各跑一遍：装依赖 → 构建 → 静态闸门 → 把 XPI 存成产物 |
-| `release.yml` | 推 `v*` 标签（或手动触发） | 构建 → 核对标签与版本号一致 → 生成 `update.json` → 发 GitHub Release |
+| `release.yml` | **网页上点一下**（或推 `v*` 标签） | 改版本号 → 提交 → 打标签 → 构建 → 核对 → 生成 `update.json` → 发 Release |
 
 **CI 的构建不动版本号。** 本地 `npm run build` 每构建一次都会把版本号 +1
 （Firefox 认缓存，同版本号换 XPI 可能不生效）；CI 用的是 `npm run build:ci`
@@ -586,29 +586,78 @@ npm run ci        # build:ci + check
 以及「工作空间能被鉴权发现」。它们要的是一台真的装了思源的机器；
 在没有思源的机器上，它们的结论只能是「没法判断」，而不是「插件坏了」。
 
-**发版**：
+### 发版：在网页上点一下
 
-```bash
-npm run build       # 版本号 +1，并且写进 manifest / package.json / src/version.js
-git commit -am "chore(release): v0.2.96"
-git tag v0.2.96 && git push origin main --tags
+**不用敲任何命令。** 打开仓库 → **Actions** → 左边选 **Release** →
+右上角 **Run workflow** → 选分支（`main`）→ 选版本号往哪走 → 按绿色的
+**Run workflow**。
+
+```
+Run workflow
+  ├─ bump:   patch / minor / major     ← 这次版本号往哪走
+  └─ draft:  ✓ / ✗                     ← 先发草稿看看
 ```
 
-推上标签就会触发 `release.yml`，它会：
+然后等它跑完（**约 1 分钟**），结束时会看到：
 
-- 构建 XPI（版本号就是标签里的那个）；
-- 用 `tools/check-release-version.mjs` 核对**标签 = `package.json` 的版本**，
-  对不上就拒绝发布 —— 否则会发出一个「自称是别的版本」的 XPI，
-  而插件自己永远更新不到它；
-- 用 `tools/make-update-json.mjs` 写出 `update.json`（含 XPI 的 sha512），
-  连带 XPI 一起挂到 Release 上。
+```
+✓ Move the version
+✓ Commit the version
+✓ Tag the release
+✓ Build the XPI
+✓ The tag must be the version of the sources
+✓ Write the update manifest
+✓ Publish the release
+```
 
-插件清单里的 `update_url` 指向 `releases/latest/download/update.json`，
-所以**只要发了 Release，Zotero 就能自己找到新版本**。
+它替你做完的事：
 
-> `update.json` 是构建产物，根目录那一份在 `.gitignore` 里。
+- **改版本号** —— `patch` 加一（`0.2.96` → `0.2.97`）、`minor` 进一（→ `0.3.0`）、
+  `major` 进一（→ `1.0.0`）。四处一起改：`addon/manifest.json`、
+  `package.json`、`package-lock.json`、`src/version.js`；
+- **提交并推上 `main`** —— 所以 `main` 永远是发出去的��份代码；
+- **打标签 `v0.2.97` 并推上去**；
+- **构建 XPI**，用 `tools/check-release-version.mjs` 核对
+  **标签 = 版本号**，对不上就**拒绝发布** —— 否则会发出一个「自称是别的版本」
+  的 XPI，而插件自己永远更新不到它；
+- **写出 `update.json`**（含 XPI 的 sha512），连带 XPI 一起挂到 Release 上。
 
-### 怎么用：日常一次改动要走完的流程
+结束后：
+
+- 仓库右侧的 **Releases** 页会多出一条 `v0.2.97`，挂着 `zotero-siyuan.xpi`
+  和 `update.json`；
+- **Zotero 里的插件自己就能找到新版本**（设置 → 插件 → 齿轮 → 检查更新）。
+
+> **先发草稿**：勾上 `draft`，Release 会停在草稿状态，你可以在 Releases 页
+> 点一下「Publish release」才真正放出去。适合想先下载 XPI 试一下的情况。
+
+> **版本号在四个地方**：`addon/manifest.json`、`package.json`、
+> `package-lock.json`、`src/version.js`。`npm run check` 盯着这四处一致 ——
+> `package-lock.json` 曾经掉队（它还停在 `0.2.54`，而别处已经是 `0.2.95`），
+> 而 `npm ci` 会拿它和 `package.json` 比对，**版本对不上时安装直接失败**。
+> 现在 bump 脚本会一起改它，闸门也会查它。
+
+### 发版：命令行那条路（可选）
+
+如果你更习惯用 git：
+
+```bash
+npm run build       # 版本号 +1，四处一起改
+npm run ci          # 本地验一遍
+git add -A && git commit -m "chore(release): v0.2.96"
+git push origin main
+git tag v0.2.96 && git push origin v0.2.96
+```
+
+推上标签会触发 `release.yml`（`push: tags` 那条入口），它会跳过「改版本号、
+提交、打标签」这三步，只做构建、核对、生成 `update.json`、发 Release。
+
+> **标签必须等于版本号。** `tools/check-release-version.mjs` 会核对
+> `v0.2.96` == `package.json` 里的 `0.2.96`，对不上就**拒绝发布**。
+> 标签打错了就把它删掉重打：
+> `git tag -d v0.2.96 && git push origin --delete v0.2.96`。
+
+### 日常改动：还是两条命令
 
 ```bash
 # 1. 改代码，然后本地先跑一遍 CI 跑的那两步（和流水线里一模一样）
@@ -628,39 +677,12 @@ git push origin main
 - **想手动跑一次**：Actions 页右上角 `Run workflow` → 选分支 → `Run workflow`。
 - **拿构建好的 XPI**：CI 跑完的那次运行底部有 `Artifacts`，下载
   `zotero-siyuan-windows-latest` 之类的压缩包，里面就是 `zotero-siyuan.xpi`。
-  想直接拿文件，也可以用 Release 里的那个（见下）。
+  想直接拿文件，也可以用 Release 里的那个（见上）。
 
 > **CI 失败时先看 `Run the static checks`**，不是看 `Build the XPI` ——
 > 构建这一步在本地也是同一条命令，出问题的话本地早就发现了。
 > 只有「The build left the sources alone」这一步是 CI 独有的：
 > 它说明构建**改了受版本控制的文件**，通常是版本号被动了。
-
-### 怎么用：发一个正式版本
-
-```bash
-# 1. 版本号 +1（会写进 manifest / package.json / src/version.js）
-npm run build
-
-# 2. 本地验一遍
-npm run ci
-
-# 3. 提交 + 打标签 + 推
-git add -A
-git commit -m "chore(release): v0.2.96"
-git push origin main
-git tag v0.2.96
-git push origin v0.2.96
-```
-
-推上标签后 `release.yml` 会跑，结束后：
-
-- 仓库的 **Releases** 页会多出一条 `v0.2.96`，挂着 `zotero-siyuan.xpi` 和 `update.json`；
-- **Zotero 里的插件会自动找到新版本**（设置 → 插件 → 齿轮 → 检查更新）。
-
-> **标签必须等于版本号。** `tools/check-release-version.mjs` 会核对
-> `v0.2.96` == `package.json` 里的 `0.2.96`，对不上就**拒绝发布**。
-> 标签打错了就把它删掉重打：
-> `git tag -d v0.2.96 && git push origin --delete v0.2.96`。
 
 ## 端到端自检
 

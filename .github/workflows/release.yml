@@ -1,24 +1,48 @@
-# Publish a release.
+# Publish a release — without touching the command line.
 #
-# The tag is the version: `v0.2.96` publishes the XPI whose manifest says
-# 0.2.96. The workflow refuses to publish anything else — a tag that lies
-# about the version would publish an artifact that calls itself something
-# it is not, and the plugin would never be able to update itself to it.
+# The way to use it: open the repository on GitHub, go to "Actions", pick
+# this workflow, press "Run workflow", choose how much the version moves
+# and press the green button. That is the whole procedure.
 #
-# The release carries two files:
+# What it does, in order:
 #
-#   zotero-siyuan.xpi  the plugin itself
-#   update.json        the manifest Zotero polls for new versions
+#   1. move the version (patch / minor / major)
+#   2. commit that and push it, so `main` always names the released code
+#   3. tag it (`v0.2.96`) and push the tag
+#   4. build the XPI
+#   5. check that the tag really is the version of the sources
+#   6. write `update.json` (the manifest Zotero polls for new versions)
+#   7. publish the GitHub Release with the XPI and the update manifest
+#
+# Step 5 is the one that matters: a tag that lies about the version
+# publishes an artifact that calls itself something it is not, and the
+# plugin would never be able to update itself to it.
+#
+# The tag is pushed with the workflow's own token, and GitHub does not
+# let a token trigger a workflow — so the `push: tags` trigger below
+# cannot fire a second time for the tag this workflow makes. The two
+# ways in are therefore independent, and neither runs twice.
 name: Release
 
 on:
+  # Push a tag yourself (from the GitHub UI or from git) and it publishes.
   push:
     tags: ["v*"]
+  # Or press the button on the Actions page.
   workflow_dispatch:
     inputs:
-      tag:
-        description: "The tag to publish, e.g. v0.2.96 (the tag must exist)"
-        required: true
+      bump:
+        description: "How far the version moves"
+        type: choice
+        options:
+          - patch
+          - minor
+          - major
+        default: patch
+      draft:
+        description: "Publish as a draft (you can review it before it goes out)"
+        type: boolean
+        default: false
 
 permissions:
   contents: write
@@ -30,7 +54,11 @@ jobs:
       - name: Check out the sources
         uses: actions/checkout@v5
         with:
-          ref: ${{ github.event.inputs.tag || github.ref }}
+          # The tag has to be fetched as well — the release names it, and
+          # the workflow pushes a tag of its own when it was started by
+          # hand. `github.ref` is the branch for a manual run and the tag
+          # for a tag run, which is what is wanted in both cases.
+          fetch-depth: 0
 
       - name: Set up Node.js
         uses: actions/setup-node@v5
@@ -41,21 +69,71 @@ jobs:
       - name: Install the dependencies
         run: npm ci
 
+      # --- 1. the version moves -------------------------------------------
+
+      - name: Move the version
+        if: github.event_name == 'workflow_dispatch'
+        run: node tools/bump-version.mjs --${{ inputs.bump }}
+
+      # Which release this is. When the workflow was started by hand it
+      # is the version that was just written into the sources; when it was
+      # started by a tag it is that tag. Both are read into one place, so
+      # no step has to guess.
+      - name: Work out which release this is
+        id: which
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            TAG="v$(node -p "require('./package.json').version")"
+          else
+            TAG="${GITHUB_REF_NAME}"
+          fi
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "version=${TAG#v}" >> "$GITHUB_OUTPUT"
+
+      - name: The version is the same everywhere
+        if: github.event_name == 'workflow_dispatch'
+        run: node tools/check-release-version.mjs "${{ steps.which.outputs.tag }}"
+
+      # --- 2. commit and tag ----------------------------------------------
+      #
+      # The release is built from a tag, and the tag has to point at a
+      # commit that *is* the release. So the version bump is committed
+      # and pushed first, and the tag is made on that commit — not on
+      # the commit before it.
+
+      - name: Commit the version
+        if: github.event_name == 'workflow_dispatch'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add addon/manifest.json package.json package-lock.json src/version.js
+          git commit -m "chore(release): ${{ steps.which.outputs.tag }}"
+          git push origin HEAD:${{ github.ref_name }}
+      - name: Tag the release
+        if: github.event_name == 'workflow_dispatch'
+        run: |
+          git tag -a "${{ steps.which.outputs.tag }}" -m "${{ steps.which.outputs.tag }}"
+          git push origin "${{ steps.which.outputs.tag }}"
+
+      # --- 3. build -------------------------------------------------------
+
       - name: Build the XPI
         run: npm run build:ci
 
+      # --- 4. the tag must be the version of the sources -------------------
+
       - name: The tag must be the version of the sources
-        env:
-          TAG: ${{ github.event.inputs.tag || github.ref_name }}
-        run: node tools/check-release-version.mjs "$TAG"
+        run: node tools/check-release-version.mjs "${{ steps.which.outputs.tag }}"
 
       - name: Write the update manifest
         run: node tools/make-update-json.mjs
 
+      # --- 5. publish -----------------------------------------------------
+
       - name: Publish the release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          TAG: ${{ github.event.inputs.tag || github.ref_name }}
+          TAG: ${{ steps.which.outputs.tag }}
         run: |
           if gh release view "$TAG" >/dev/null 2>&1; then
             # A re-run of the workflow: replace what is there.
@@ -66,5 +144,7 @@ jobs:
             # publish a release that is not the code that was checked.
             gh release create "$TAG" zotero-siyuan.xpi update.json \
               --verify-tag \
-              --title "Zotero → SiYuan $TAG" --generate-notes
+              --title "Zotero → SiYuan $TAG" \
+              --generate-notes \
+              ${{ inputs.draft && '--draft' || '' }}
           fi

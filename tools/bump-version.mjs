@@ -13,6 +13,12 @@
  * build is really running. The addon manager keeps its *own* copy of the
  * version, and that copy can be a version behind the code: the script is
  * read fresh, the cached manifest is not.
+ *
+ * Usage:
+ *   node tools/bump-version.mjs             # patch +1 (the default)
+ *   node tools/bump-version.mjs --minor     # 0.2.9 → 0.3.0
+ *   node tools/bump-version.mjs --major     # 0.2.9 → 1.0.0
+ *   node tools/bump-version.mjs --no-bump   # leave the version alone
  */
 import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -21,14 +27,28 @@ import { fileURLToPath } from "node:url";
 const ROOT = fileURLToPath(new URL("..", import.meta.url));
 const MANIFEST = join(ROOT, "addon", "manifest.json");
 const PACKAGE = join(ROOT, "package.json");
+const LOCK = join(ROOT, "package-lock.json");
 const VERSION_FILE = join(ROOT, "src", "version.js");
 
-function bump(version) {
+/**
+ * Move the version forward.
+ *
+ * @param {String} version - the current version
+ * @param {String} level - "patch", "minor" or "major"
+ * @returns {String} the next version
+ */
+function bump(version, level = "patch") {
 	const parts = String(version || "0.0.0").split(".");
 	while (parts.length < 3) {
 		parts.push("0");
 	}
 	const [major, minor, patch] = parts.map((n) => Number(n) || 0);
+	if (level === "major") {
+		return `${major + 1}.0.0`;
+	}
+	if (level === "minor") {
+		return `${major}.${minor + 1}.0`;
+	}
 	return `${major}.${minor}.${patch + 1}`;
 }
 
@@ -71,9 +91,23 @@ if (skip) {
 	process.exit(0);
 }
 
+/*
+ * Which part of the version moves.
+ *
+ * The default is the patch level, because that is what a plain build
+ * wants. A release says which one it is — a bug fix is a patch, a new
+ * feature is a minor, a rewrite that breaks the old notes is a major.
+ */
+const level = process.argv.includes("--major")
+	? "major"
+	: process.argv.includes("--minor")
+		? "minor"
+		: "patch";
+
 // Whichever of the two is ahead decides the next number.
 const next = bump(
 	manifest.version === pkg.version ? manifest.version : pkg.version,
+	level,
 );
 
 manifest.version = next;
@@ -81,6 +115,25 @@ pkg.version = next;
 
 writeFileSync(MANIFEST, `${JSON.stringify(manifest, null, 2)}\n`, "utf8");
 writeFileSync(PACKAGE, `${JSON.stringify(pkg, null, 2)}\n`, "utf8");
+
+/*
+ * The lock file carries the version too — twice, in fact: once at the
+ * top and once in the entry for the root package. `npm ci` compares the
+ * two, so a lock file that still names the old version makes the CI
+ * install step fail with a version mismatch. It is written here, so the
+ * four places that name the version always say the same thing.
+ */
+try {
+	const lock = JSON.parse(readFileSync(LOCK, "utf8"));
+	lock.version = next;
+	if (lock.packages && lock.packages[""]) {
+		lock.packages[""].version = next;
+	}
+	writeFileSync(LOCK, `${JSON.stringify(lock, null, 2)}\n`, "utf8");
+}
+catch (e) {
+	console.warn(`could not update package-lock.json: ${e.message}`);
+}
 
 // The version goes into the code as well, so that the running plugin can
 // say which build it is — the addon's own cache cannot be trusted for it.
