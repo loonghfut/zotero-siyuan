@@ -35,6 +35,42 @@ function bump(version) {
 const manifest = JSON.parse(readFileSync(MANIFEST, "utf8"));
 const pkg = JSON.parse(readFileSync(PACKAGE, "utf8"));
 
+/*
+ * The bump can be switched off.
+ *
+ * A local build wants a new version every time — that is what keeps
+ * Firefox from running yesterday's code. The CI build does not: it
+ * verifies the *committed* sources, and a build that rewrote the version
+ * would leave the working tree dirty and the artifact claiming to be a
+ * release that never happened. So the CI build asks for the version to
+ * stay where it is.
+ */
+const skip = process.argv.includes("--no-bump")
+	|| process.env.SKIP_VERSION_BUMP === "1";
+
+if (skip) {
+	if (manifest.version !== pkg.version) {
+		console.error(
+			`the manifest says ${manifest.version}, package.json says ` +
+				`${pkg.version} — they have to agree before a build`,
+		);
+		process.exit(1);
+	}
+	const written = /export const VERSION = "([^"]+)";/.exec(
+		readFileSync(VERSION_FILE, "utf8"),
+	);
+	if (!written || written[1] !== pkg.version) {
+		console.error(
+			`src/version.js says ${written ? written[1] : "nothing"}, ` +
+				`package.json says ${pkg.version} — they have to agree ` +
+				"before a build",
+		);
+		process.exit(1);
+	}
+	console.log(`version → ${pkg.version} (not moved)`);
+	process.exit(0);
+}
+
 // Whichever of the two is ahead decides the next number.
 const next = bump(
 	manifest.version === pkg.version ? manifest.version : pkg.version,

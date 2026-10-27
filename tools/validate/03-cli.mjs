@@ -205,6 +205,15 @@ section("SiYuan HTTP fallback discovery");
       `         → ${found.dir} (port ${found.port}, notebooks: ${found.notebooks.join(", ")})`,
     );
   }
+  else if (!workspaces.length) {
+    // No SiYuan on this machine — nothing to discover. A CI runner has
+    // none, and "the workspace could not be found" there is a fact about
+    // the runner, not a defect of the plugin.
+    console.log(
+      "  [SKIP] no SiYuan workspace is installed on this machine; " +
+        "the discovery check cannot be judged",
+    );
+  }
   else if (rateLimited) {
     // The kernel locks itself out after too many *failed* authentications.
     // That is a state of the machine, not a defect of the plugin — and it

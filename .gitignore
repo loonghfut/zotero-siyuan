@@ -2,6 +2,7 @@ node_modules/
 .scaffold/
 dist/
 *.xpi
+update.json
 *.log
 .DS_Store
 # Local configuration: machine paths and tokens stay out of the repository.

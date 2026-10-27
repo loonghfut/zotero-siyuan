@@ -1,0 +1,66 @@
+# The build and the static checks of the plugin.
+#
+# The checks are the ones `npm run check` runs locally: they catch the
+# failures a successful build does not reveal (an unbound callback, a
+# Fluent id no locale defines, an XPI that misses a file the client needs).
+#
+# The build must not move the version: the CI verifies the *committed*
+# sources, so the working tree has to stay untouched — that is what the
+# `git diff --exit-code` below is there for.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+# One run per branch: a newer push makes the older one pointless.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: build & check (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      # One platform failing must not hide the verdict of the other.
+      fail-fast: false
+      matrix:
+        # The plugin runs on the user's own machine, so the checks have to
+        # hold on more than one platform: separators and paths differ.
+        os: [ubuntu-latest, windows-latest]
+    steps:
+      - name: Check out the sources
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          # The build tool (zotero-plugin-scaffold) asks for Node 22.8 or
+          # newer; the README says the same.
+          node-version: "22"
+          cache: npm
+
+      - name: Install the dependencies
+        run: npm ci
+
+      - name: Build the XPI
+        run: npm run build:ci
+
+      - name: The build left the sources alone
+        run: git diff --exit-code
+
+      - name: Run the static checks
+        run: npm run check
+
+      - name: Upload the XPI
+        uses: actions/upload-artifact@v4
+        with:
+          name: zotero-siyuan-${{ matrix.os }}
+          path: zotero-siyuan.xpi
+          if-no-files-found: error

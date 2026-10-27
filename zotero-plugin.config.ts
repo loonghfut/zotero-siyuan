@@ -8,7 +8,7 @@ export default defineConfig({
   id: pkg.config.addonID,
   namespace: pkg.config.addonRef,
   updateURL:
-    "https://github.com/{{owner}}/{{repo}}/releases/download/release/update.json",
+    "https://github.com/{{owner}}/{{repo}}/releases/latest/download/update.json",
   xpiDownloadLink:
     "https://github.com/{{owner}}/{{repo}}/releases/download/v{{version}}/{{xpiName}}.xpi",
 

@@ -20,7 +20,7 @@ import { extname, join, relative } from "node:path";
 /* ------------------------------ 1. syntax ------------------------------ */
 
 section("JavaScript syntax");
-for (const file of files.filter((f) => extname(f) === ".js")) {
+for (const file of files.filter((f) => /\.(js|mjs)$/.test(f))) {
   try {
     execFileSync(process.execPath, ["--check", file], { stdio: "pipe" });
     check(relative(ROOT, file), true);

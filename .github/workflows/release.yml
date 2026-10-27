@@ -1,0 +1,66 @@
+# Publish a release.
+#
+# The tag is the version: `v0.2.96` publishes the XPI whose manifest says
+# 0.2.96. The workflow refuses to publish anything else — a tag that lies
+# about the version would publish an artifact that calls itself something
+# it is not, and the plugin would never be able to update itself to it.
+#
+# The release carries two files:
+#
+#   zotero-siyuan.xpi  the plugin itself
+#   update.json        the manifest Zotero polls for new versions
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "The tag to publish, e.g. v0.2.96 (the tag must exist)"
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out the sources
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.tag || github.ref }}
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+
+      - name: Install the dependencies
+        run: npm ci
+
+      - name: Build the XPI
+        run: npm run build:ci
+
+      - name: The tag must be the version of the sources
+        env:
+          TAG: ${{ github.event.inputs.tag || github.ref_name }}
+        run: node tools/check-release-version.mjs "$TAG"
+
+      - name: Write the update manifest
+        run: node tools/make-update-json.mjs
+
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ github.event.inputs.tag || github.ref_name }}
+        run: |
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            # A re-run of the workflow: replace what is there.
+            gh release upload "$TAG" zotero-siyuan.xpi update.json --clobber
+          else
+            gh release create "$TAG" zotero-siyuan.xpi update.json \
+              --title "Zotero → SiYuan $TAG" --generate-notes
+          fi

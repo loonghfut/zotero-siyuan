@@ -475,7 +475,7 @@ zotero-siyuan/
 |---|---|
 | Zotero | 7.0 及以上（已在本机 Zotero 10.0.6 上核对 API） |
 | 思源笔记 | 3.7 及以上（`siyuan` 命令行随内核附带） |
-| Node.js | 20 及以上（构建用） |
+| Node.js | 22.8 及以上（构建用；构建工具 `zotero-plugin-scaffold` 的要求） |
 
 Windows 上 `siyuan.exe` 通常在：
 
@@ -492,7 +492,9 @@ Windows 上 `siyuan.exe` 通常在：
 npm install
 npm run build     # 产物：zotero-siyuan.xpi（构建后自动同步到仓库根目录）
 npm start         # 启动 Zotero 并热重载插件（开发用）
-npm run check     # 静态回归闸门（257 项）
+npm run check     # 静态回归闸门（496 项）
+npm run build:ci  # 同 build，但不动版本号（CI 用）
+npm run ci        # build:ci + check
 ```
 
 `npm start` 需要先在 `.env` 里填好 Zotero 路径；它会建一个独立的 `dev` profile，
@@ -562,6 +564,46 @@ npm run check     # 静态回归闸门（257 项）
 > 所以装完插件后**再重启一次 Zotero**，再去验证行为。
 > 怎么知道跑的是新代码？看自检报告里有没有新加的字段 ——
 > 比如图片压缩会多出 `compressed` / `originalSize` / `sentSize`。
+
+## CI 与发布
+
+`.github/workflows/` 下有两条流水线，**都不需要你本机有思源**：
+
+| 流水线 | 什么时候跑 | 做什么 |
+|---|---|---|
+| `ci.yml` | 推 `main`、提 PR、手动触发 | Ubuntu + Windows 各跑一遍：装依赖 → 构建 → 静态闸门 → 把 XPI 存成产物 |
+| `release.yml` | 推 `v*` 标签（或手动触发） | 构建 → 核对标签与版本号一致 → 生成 `update.json` → 发 GitHub Release |
+
+**CI 的构建不动版本号。** 本地 `npm run build` 每build 一次都会把版本号 +1
+（Firefox 认缓存，同版本号换 XPI 可能不生效）；CI 用的是 `npm run build:ci`
+（`tools/bump-version.mjs --no-bump`），它**验证已提交的源码**，所以工作区必须
+保持干净 —— 流水线里那句 `git diff --exit-code` 就是守这个的。
+
+**CI 上没有思源，所以有两项检查会跳过而不是失败**：命令行候选路径的实测、
+以及「工作空间能被鉴权发现」。它们要的是一台真的装了思源的机器；
+在没有思源的机器上，它们的结论只能是「没法判断」，而不是「插件坏了」。
+
+**发版**：
+
+```bash
+npm run build       # 版本号 +1，并且写进 manifest / package.json / src/version.js
+git commit -am "chore(release): v0.2.96"
+git tag v0.2.96 && git push origin main --tags
+```
+
+推上标签就会触发 `release.yml`，它会：
+
+- 构建 XPI（版本号就是标签里的那个）；
+- 用 `tools/check-release-version.mjs` 核对**标签 = `package.json` 的版本**，
+  对不上就拒绝发布 —— 否则会发出一个「自称是别的版本」的 XPI，
+  而插件自己永远更新不到它；
+- 用 `tools/make-update-json.mjs` 写出 `update.json`（含 XPI 的 sha512），
+  连带 XPI 一起挂到 Release 上。
+
+插件清单里的 `update_url` 指向 `releases/latest/download/update.json`，
+所以**只要发了 Release，Zotero 就能自己找到新版本**。
+
+> `update.json` 是构建产物，根目录那一份在 `.gitignore` 里。
 
 ## 端到端自检
 

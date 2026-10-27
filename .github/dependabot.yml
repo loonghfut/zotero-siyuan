@@ -1,0 +1,18 @@
+# Keep the build tool up to date.
+#
+# The plugin has two dependencies, and both of them are build tools: the
+# scaffold that builds the XPI and the Fluent parser the checks use to read
+# the language files. A new version of either can break the build, so it
+# is better to find out here than on release day.
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: "/"
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: "chore(deps)"
+    groups:
+      build-tools:
+        patterns:
+          - "*"
