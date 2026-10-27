@@ -150,6 +150,45 @@
       ></html:button>
     </html:div>
 
+    <!--
+      The shelf: the templates the user worked out and wants to keep. The
+      dropdown lists them, the box next to it names the one being saved,
+      and the three buttons are all the shelf needs.
+    -->
+    <html:div class="zsi-field zsi-field-templates">
+      <html:label
+        class="zsi-label"
+        for="zotero-prefpane-zoteroSiYuan-template-saved"
+        data-l10n-id="pref-templates"
+      ></html:label>
+      <html:select
+        class="zsi-select"
+        id="zotero-prefpane-zoteroSiYuan-template-saved"
+      ></html:select>
+      <html:input
+        class="zsi-input"
+        id="zotero-prefpane-zoteroSiYuan-template-save-name"
+        type="text"
+      ></html:input>
+      <html:button
+        class="zsi-button"
+        id="zotero-prefpane-zoteroSiYuan-template-save"
+        data-l10n-id="pref-templates-save"
+      ></html:button>
+      <html:button
+        class="zsi-button"
+        id="zotero-prefpane-zoteroSiYuan-template-load"
+        data-l10n-id="pref-templates-load"
+      ></html:button>
+      <html:button
+        class="zsi-button"
+        id="zotero-prefpane-zoteroSiYuan-template-delete"
+        data-l10n-id="pref-templates-delete"
+      ></html:button>
+    </html:div>
+
+    <html:p class="zsi-hint" data-l10n-id="pref-templates-hint"></html:p>
+
     <html:div class="zsi-field">
       <html:label class="zsi-label" data-l10n-id="pref-template"></html:label>
       <html:button

@@ -11,6 +11,7 @@ declare namespace _ZoteroTypes {
       "workspace": string;
       "notebook": string;
       "template": string;
+      "templates": string;
       "imageCompress": string;
       "imageQuality": string;
       "selfTest": string;

@@ -230,6 +230,24 @@ pictureMarkdown(assetPath, alt)      生成 ![](assets/…) 插入正文
 - 变量表 `TEMPLATE_VARIABLES` + 预设 `TEMPLATE_PRESETS` 同时喂给设置页的提示与预览。
 - 设置页在光标处插入变量/条件（`template-edit.js`），并把选区包进条件里。
 
+**用户保存的模板**（`template-store.js`，纯函数，不碰 Zotero）：
+
+```
+偏好 templates = [{ id, name, template }, …]（JSON 字符串，上限 50）
+   saveTemplate( shelf, { id?, name?, template? } )
+     id 命中          → 更新那一份（给了名字就顺便改名）
+     名字命中          → 更新同名的那一份（不会堆出副本）
+     都没有            → 新建一份，追加到末尾
+   空模板 / 没名字 / 满了 → 返回 error，让面板把原因说给用户听
+```
+
+- `parseSavedTemplates()` 对一切手改坏的偏好都返回空列表：非法 JSON、不是数组、
+  缺 `template`、缺 `id`（补一个）、`id` 重复（第二个换一个）—— 面板不会因为一个
+  偏好打不开。
+- 面板侧：下拉列表 + 名字框 + 保存/套用/删除；**删除按两次**（`_deleteArm`），
+  换一份就把待删状态收回去；列表为空时「套用」「删除」置灰。
+- 自检（`ui: true`）真的存一份、套回来、删掉，最后把 `templates` 偏好原样写回。
+
 ---
 
 ## 8. 传输层：两个通道，一个接口
@@ -277,7 +295,7 @@ Zotero 把 `scripts` 数组里的文件**按顺序加载进同一个面板作用
 | 文件 | 职责 |
 |---|---|
 | `preferences.js` | 建对象：元素 id、常量、状态、`init()`、共享工具 |
-| `preferences-template.js` | 模板编辑器、预览、预设、条件插入 |
+| `preferences-template.js` | 模板编辑器、预览、预设、条件插入、我的模板 |
 | `preferences-variables.js` | 变量列表、筛选、条件变量选择 |
 | `preferences-pictures.js` | 图片压缩设置、框选检查 |
 | `preferences-actions.js` | 测试连接、重扫索引、自检 |

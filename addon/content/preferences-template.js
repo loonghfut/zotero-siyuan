@@ -280,6 +280,277 @@ Object.assign(ZoteroSiYuanPreferences, {
   },
 
 
+  /* ----------------------------------------------- the templates I saved */
+
+  /**
+   * Fill the list of the templates the user saved.
+   *
+   * The list is the shelf: the shapes worked out once and kept. Without it
+   * a template that took an hour to get right is lost the moment another
+   * one is typed over it.
+   *
+   * @param {String} [selectedId] - the one to pick afterwards
+   */
+  _renderSavedTemplates: function (selectedId) {
+    var select = document.getElementById(this.SAVED_ID);
+    var addon = Zotero.ZoteroSiYuan;
+    if (!select || !addon || !addon.getSavedTemplates) {
+      return;
+    }
+    var list = addon.getSavedTemplates() || [];
+    select.textContent = "";
+    for (var i = 0; i < list.length; i++) {
+      var option = document.createElementNS(this.XHTML, "option");
+      option.value = list[i].id;
+      option.textContent = list[i].name;
+      select.appendChild(option);
+    }
+    if (!list.length) {
+      var empty = document.createElementNS(this.XHTML, "option");
+      empty.value = "";
+      empty.textContent = this._text(
+        "zoteroSiYuan-pref-templates-empty",
+        "Nothing saved yet",
+      );
+      select.appendChild(empty);
+    }
+    // An empty shelf has nothing to put into the editor and nothing to
+    // take off it. The buttons say so by being greyed out — a button that
+    // silently does nothing when it is pressed is worse than no button.
+    select.disabled = !list.length;
+    this._enableSavedButtons(list.length > 0);
+    if (selectedId) {
+      for (var j = 0; j < list.length; j++) {
+        if (list[j].id === selectedId) {
+          select.value = selectedId;
+          break;
+        }
+      }
+    }
+  },
+
+
+  /** Grey out "apply" and "delete" when the shelf is empty. */
+  _enableSavedButtons: function (enabled) {
+    var ids = [this.LOAD_ID, this.DELETE_ID];
+    for (var i = 0; i < ids.length; i++) {
+      var button = document.getElementById(ids[i]);
+      if (button) {
+        button.disabled = !enabled;
+      }
+    }
+  },
+
+
+  /** The saved template with this id, as the shelf has it now. */
+  _savedEntry: function (id) {
+    var addon = Zotero.ZoteroSiYuan;
+    if (!id || !addon || !addon.getSavedTemplates) {
+      return null;
+    }
+    var list = addon.getSavedTemplates() || [];
+    for (var i = 0; i < list.length; i++) {
+      if (list[i].id === id) {
+        return list[i];
+      }
+    }
+    return null;
+  },
+
+
+  /**
+   * Another template was picked from the list.
+   *
+   * Its name goes into the box, so pressing "save" puts the editor back
+   * into *that* template instead of making a copy under a new name.
+   */
+  _savedTemplatePicked: function () {
+    var select = document.getElementById(this.SAVED_ID);
+    var nameBox = document.getElementById(this.SAVED_NAME_ID);
+    if (!select || !nameBox) {
+      return;
+    }
+    // Picking another one also takes back a "delete" that was armed for
+    // the one before it.
+    this._deleteArm = null;
+    var entry = this._savedEntry(String(select.value || ""));
+    if (entry) {
+      nameBox.value = entry.name;
+    }
+  },
+
+
+  /**
+   * Put the template that is in the editor on the shelf.
+   *
+   * Where it goes follows from what the box says: a name that is already
+   * there replaces that template, a new one starts another, and no name at
+   * all — with one picked from the list — updates the one that is picked.
+   */
+  saveMyTemplate: function () {
+    var area = document.getElementById(this.TEMPLATE_ID);
+    var nameBox = document.getElementById(this.SAVED_NAME_ID);
+    var select = document.getElementById(this.SAVED_ID);
+    var addon = Zotero.ZoteroSiYuan;
+    if (!area || !addon || !addon.saveSavedTemplate) {
+      return;
+    }
+    var name = nameBox ? String(nameBox.value || "").trim() : "";
+    var id = select && select.value ? String(select.value) : "";
+    if (!name && !id) {
+      this._setStatus(
+        this._text(
+          "zoteroSiYuan-pref-template-need-name",
+          "Give the template a name first",
+        ),
+        true,
+      );
+      return;
+    }
+    var result = addon.saveSavedTemplate({
+      // A name of its own wins: with one, the editor is saved as that
+      // template; without one, as the template that is picked.
+      id: name ? "" : id,
+      name: name,
+      template: area.value,
+    });
+    if (!result.ok) {
+      this._setStatus(this._savedError(result.error), true);
+      return;
+    }
+    var entry = result.entry;
+    if (nameBox && entry) {
+      nameBox.value = entry.name;
+    }
+    this._renderSavedTemplates(entry ? entry.id : "");
+    this._setStatus(
+      (result.created
+        ? this._text("zoteroSiYuan-pref-template-save-new", "Saved")
+        : this._text("zoteroSiYuan-pref-template-save-updated", "Updated")) +
+        " " +
+        (entry ? entry.name : ""),
+      false,
+    );
+  },
+
+
+  /** Why a template could not be saved, in the user's words. */
+  _savedError: function (error) {
+    if (error === "empty") {
+      return this._text(
+        "zoteroSiYuan-pref-template-save-empty",
+        "The template is empty — there is nothing to save",
+      );
+    }
+    if (error === "limit") {
+      return this._text(
+        "zoteroSiYuan-pref-template-save-limit",
+        "The shelf is full — delete one first",
+      );
+    }
+    return this._text(
+      "zoteroSiYuan-pref-template-need-name",
+      "Give the template a name first",
+    );
+  },
+
+
+  /**
+   * Put a saved template back into the editor.
+   *
+   * The pane stores what the editor holds when the editor says it
+   * changed — so the event is fired on purpose here: without it the
+   * template would be in the box but not in use.
+   */
+  applySavedTemplate: function () {
+    var select = document.getElementById(this.SAVED_ID);
+    var area = document.getElementById(this.TEMPLATE_ID);
+    if (!select || !area) {
+      return;
+    }
+    var entry = this._savedEntry(String(select.value || ""));
+    if (!entry) {
+      this._setStatus(
+        this._text(
+          "zoteroSiYuan-pref-template-need-pick",
+          "Pick one of your templates first",
+        ),
+        true,
+      );
+      return;
+    }
+    area.value = entry.template;
+    var nameBox = document.getElementById(this.SAVED_NAME_ID);
+    if (nameBox) {
+      nameBox.value = entry.name;
+    }
+    this._caret = area.value.length;
+    this._caretEnd = area.value.length;
+    this.onTemplateInput();
+    this._setStatus(
+      this._text("zoteroSiYuan-pref-template-loaded", "Loaded") +
+        " " +
+        entry.name,
+      false,
+    );
+  },
+
+
+  /**
+   * Take a saved template off the shelf.
+   *
+   * There is no undo, and a template can hold an hour of work — so the
+   * first press only asks and says what it would take away. A second
+   * press on the same one does it.
+   */
+  deleteSavedTemplate: function () {
+    var select = document.getElementById(this.SAVED_ID);
+    var addon = Zotero.ZoteroSiYuan;
+    if (!select || !addon || !addon.deleteSavedTemplate) {
+      return;
+    }
+    var id = String(select.value || "");
+    var entry = this._savedEntry(id);
+    if (!entry) {
+      this._setStatus(
+        this._text(
+          "zoteroSiYuan-pref-template-need-pick",
+          "Pick one of your templates first",
+        ),
+        true,
+      );
+      return;
+    }
+    if (this._deleteArm !== id) {
+      this._deleteArm = id;
+      this._setStatus(
+        this._text(
+          "zoteroSiYuan-pref-template-delete-ask",
+          "Press Delete again to remove",
+        ) +
+          " " +
+          entry.name,
+        false,
+      );
+      return;
+    }
+    this._deleteArm = null;
+    var result = addon.deleteSavedTemplate(id);
+    this._renderSavedTemplates();
+    this._setStatus(
+      result.ok
+        ? this._text("zoteroSiYuan-pref-template-deleted", "Deleted") +
+            " " +
+            entry.name
+        : this._text(
+            "zoteroSiYuan-pref-template-need-pick",
+            "Pick one of your templates first",
+          ),
+      !result.ok,
+    );
+  },
+
+
   _schedulePreview: function () {
     var self = this;
     if (this._previewTimer) {

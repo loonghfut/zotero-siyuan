@@ -228,6 +228,121 @@ export async function testPreferencesPane(addon) {
 			);
 		}
 
+		// --- the templates the user saved ------------------------------
+		// The shelf is the part that has to hold: a template somebody
+		// worked out is worth more than the one in the editor right now,
+		// and it is kept in a preference the test is about to write to.
+		const originalShelf = String(addon.getPref("templates", "") || "");
+		const shelfControls = {
+			list: doc.getElementById(
+				"zotero-prefpane-zoteroSiYuan-template-saved",
+			),
+			name: doc.getElementById(
+				"zotero-prefpane-zoteroSiYuan-template-save-name",
+			),
+			save: doc.getElementById("zotero-prefpane-zoteroSiYuan-template-save"),
+			load: doc.getElementById("zotero-prefpane-zoteroSiYuan-template-load"),
+			remove: doc.getElementById(
+				"zotero-prefpane-zoteroSiYuan-template-delete",
+			),
+		};
+		for (const [key, control] of Object.entries(shelfControls)) {
+			if (!control) {
+				throw new Error(
+					`the pane has no "${key}" control for the saved templates`,
+				);
+			}
+		}
+
+		const shelfName = "自检模板";
+		const shelfTemplate = "> [!quote] 自检\n{{title}}";
+		let shelf = { name: shelfName };
+		try {
+			area.value = shelfTemplate;
+			area.dispatchEvent(
+				new win.Event("input", { bubbles: true, cancelable: false }),
+			);
+			await sleep(200);
+
+			shelfControls.name.value = shelfName;
+			shelfControls.save.dispatchEvent(
+				new win.MouseEvent("click", { bubbles: true, cancelable: true }),
+			);
+			await sleep(300);
+
+			const onShelf = (addon.getSavedTemplates() || []).find(
+				(entry) => entry && entry.name === shelfName,
+			);
+			if (!onShelf) {
+				throw new Error(`the pane did not save the template "${shelfName}"`);
+			}
+
+			// Loading it has to bring it back — into the editor *and* into
+			// the template the plugin sends with.
+			area.value = "{{title}}";
+			area.dispatchEvent(
+				new win.Event("input", { bubbles: true, cancelable: false }),
+			);
+			await sleep(200);
+			shelfControls.list.value = onShelf.id;
+			shelfControls.load.dispatchEvent(
+				new win.MouseEvent("click", { bubbles: true, cancelable: true }),
+			);
+			await sleep(300);
+			shelf.loaded =
+				area.value === shelfTemplate &&
+				String(addon.getTemplate()) === shelfTemplate;
+
+			// Taking it off again takes two presses: the first one only
+			// asks, because there is no undo.
+			shelfControls.list.value = onShelf.id;
+			shelfControls.remove.dispatchEvent(
+				new win.MouseEvent("click", { bubbles: true, cancelable: true }),
+			);
+			await sleep(250);
+			shelf.askedFirst = (addon.getSavedTemplates() || []).some(
+				(entry) => entry && entry.id === onShelf.id,
+			);
+			shelfControls.remove.dispatchEvent(
+				new win.MouseEvent("click", { bubbles: true, cancelable: true }),
+			);
+			await sleep(300);
+			shelf.deleted = !(addon.getSavedTemplates() || []).some(
+				(entry) => entry && entry.id === onShelf.id,
+			);
+
+			if (!shelf.loaded) {
+				throw new Error(
+					`loading the saved template did not bring it back: ${JSON.stringify(area.value)}`,
+				);
+			}
+			if (!shelf.askedFirst) {
+				throw new Error("the first press of Delete removed the template");
+			}
+			if (!shelf.deleted) {
+				throw new Error("the second press of Delete did not remove the template");
+			}
+		}
+		finally {
+			// The user's shelf has to be exactly what it was, whatever
+			// happened in between.
+			try {
+				addon.setPref("templates", originalShelf);
+			}
+			catch (e) {
+				// ignore
+			}
+			try {
+				area.value = original;
+				area.dispatchEvent(
+					new win.Event("input", { bubbles: true, cancelable: false }),
+				);
+			}
+			catch (e) {
+				// ignore
+			}
+		}
+
 		return {
 			variables: rows.length,
 			variable: name,
@@ -237,6 +352,7 @@ export async function testPreferencesPane(addon) {
 			after,
 			conditionals,
 			picture,
+			shelf,
 		};
 	}
 	finally {

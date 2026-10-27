@@ -30,6 +30,11 @@ var ZoteroSiYuanPreferences = {
   RESULT_ID: "zotero-prefpane-zoteroSiYuan-result",
   PRESET_ID: "zotero-prefpane-zoteroSiYuan-template-preset",
   PRESET_APPLY_ID: "zotero-prefpane-zoteroSiYuan-template-preset-apply",
+  SAVED_ID: "zotero-prefpane-zoteroSiYuan-template-saved",
+  SAVED_NAME_ID: "zotero-prefpane-zoteroSiYuan-template-save-name",
+  SAVE_ID: "zotero-prefpane-zoteroSiYuan-template-save",
+  LOAD_ID: "zotero-prefpane-zoteroSiYuan-template-load",
+  DELETE_ID: "zotero-prefpane-zoteroSiYuan-template-delete",
   PROBLEMS_ID: "zotero-prefpane-zoteroSiYuan-template-problems",
   FILTER_ID: "zotero-prefpane-zoteroSiYuan-variable-filter",
   ONLY_USED_ID: "zotero-prefpane-zoteroSiYuan-variable-only-used",
@@ -111,6 +116,18 @@ var ZoteroSiYuanPreferences = {
         e.preventDefault();
         this.applyPreset();
       }
+      else if (target.id === this.SAVE_ID) {
+        e.preventDefault();
+        this.saveMyTemplate();
+      }
+      else if (target.id === this.LOAD_ID) {
+        e.preventDefault();
+        this.applySavedTemplate();
+      }
+      else if (target.id === this.DELETE_ID) {
+        e.preventDefault();
+        this.deleteSavedTemplate();
+      }
       else if (target.id === this.CONDITIONAL_IF_ID) {
         e.preventDefault();
         this.insertConditional(this._chosenConditionalVariable());
@@ -155,6 +172,12 @@ var ZoteroSiYuanPreferences = {
       }
       if (target.id === this.ONLY_USED_ID) {
         this._renderVariables(this._filteredVariables());
+      }
+      else if (target.id === this.SAVED_ID) {
+        // Picking another template puts the name of that one in the box,
+        // and takes back the "click delete again" that was armed for the
+        // one before it.
+        this._savedTemplatePicked();
       }
       else if (target.id === this.IMAGE_COMPRESS_ID) {
         this._saveImageSetting("imageCompress", target.checked ? "1" : "0");
@@ -261,8 +284,16 @@ var ZoteroSiYuanPreferences = {
         "Filter by name or meaning…",
       );
     }
+    var nameBox = document.getElementById(this.SAVED_NAME_ID);
+    if (nameBox) {
+      nameBox.placeholder = this._text(
+        "zoteroSiYuan-pref-template-save-name",
+        "A name for the template…",
+      );
+    }
     this._variables = help.variables || [];
     this._renderPresets();
+    this._renderSavedTemplates();
     this._renderVariables(this._filteredVariables());
     this._renderConditionalVariables();
     this._restoreImageSettings();

@@ -66,6 +66,14 @@
   margin-top: 14px;
 }
 
+/* The shelf: the list of the user's templates, the name of the one being
+   saved, and the three buttons beside it. */
+.zsi-field-templates {
+  grid-template-columns:
+    9em minmax(5em, 1.1fr) minmax(5em, 0.9fr) repeat(3, auto);
+  margin-top: 14px;
+}
+
 .zsi-actions {
   display: flex;
   flex-wrap: wrap;
@@ -283,7 +291,8 @@
 @media (max-width: 620px) {
   .zsi-field,
   .zsi-field-filter,
-  .zsi-field-conditional {
+  .zsi-field-conditional,
+  .zsi-field-templates {
     grid-template-columns: minmax(0, 1fr);
   }
 

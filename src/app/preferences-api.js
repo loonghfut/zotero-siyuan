@@ -25,6 +25,13 @@ import {
 	templateVariables,
 	validateTemplate,
 } from "../modules/template.js";
+import {
+	TEMPLATES_PREF,
+	deleteSavedTemplate as removeFromShelf,
+	parseSavedTemplates,
+	saveTemplate as putOnShelf,
+	serializeSavedTemplates,
+} from "../modules/template-store.js";
 
 export default {
   /**
@@ -164,6 +171,65 @@ export default {
   /** Forget the user's template and go back to the default. */
   resetTemplate() {
     return setPref("template", "");
+  },
+
+  /* ----------------------------------------------------- the user's shelf */
+
+  /**
+   * The templates the user saved.
+   *
+   * The pane runs in its own scope and cannot read the preference itself,
+   * so it asks for the shelf every time it draws one.
+   *
+   * @returns {Array<{id: String, name: String, template: String}>}
+   */
+  getSavedTemplates() {
+    return parseSavedTemplates(getPref(TEMPLATES_PREF, ""));
+  },
+
+  /**
+   * Put the template being edited on the shelf.
+   *
+   * @param {{id?: String, name?: String, template?: String}} entry
+   * @returns {{ok: Boolean, created: Boolean, error: String,
+   *   entry: Object|null, templates: Array}}
+   */
+  saveSavedTemplate(entry = {}) {
+    const shelf = parseSavedTemplates(getPref(TEMPLATES_PREF, ""));
+    const result = putOnShelf(shelf, entry);
+    if (result.error) {
+      return {
+        ok: false,
+        created: false,
+        error: result.error,
+        entry: null,
+        templates: result.list,
+      };
+    }
+    setPref(TEMPLATES_PREF, serializeSavedTemplates(result.list));
+    return {
+      ok: true,
+      created: result.created,
+      error: "",
+      entry: result.entry,
+      templates: result.list,
+    };
+  },
+
+  /**
+   * Take a template off the shelf.
+   *
+   * @param {String} id
+   * @returns {{ok: Boolean, removed: Object|null, templates: Array}}
+   */
+  deleteSavedTemplate(id) {
+    const shelf = parseSavedTemplates(getPref(TEMPLATES_PREF, ""));
+    const result = removeFromShelf(shelf, id);
+    if (!result.removed) {
+      return { ok: false, removed: null, templates: result.list };
+    }
+    setPref(TEMPLATES_PREF, serializeSavedTemplates(result.list));
+    return { ok: true, removed: result.removed, templates: result.list };
   },
 
   /**

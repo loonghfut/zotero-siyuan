@@ -16,6 +16,7 @@ import "./validate/01-syntax.mjs"; // Syntax and callback binding
 import "./validate/02-fluent.mjs"; // The Fluent messages the plugin asks for
 import "./validate/03-cli.mjs"; // The siyuan CLI: where it is, and what it answers
 import "./validate/04-template.mjs"; // The send template and its editor
+import "./validate/04b-template-store.mjs"; // The templates the user saved
 import "./validate/05-pane.mjs"; // The preferences pane: conditionals and picture settings
 import "./validate/06-index.mjs"; // The index of sent annotations, the launcher, the package
 import "./validate/07-reader.mjs"; // The reader's sidebar contract

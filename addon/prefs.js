@@ -3,6 +3,9 @@ pref("workspace", "");
 pref("notebook", "");
 // The send template. Empty = use the built-in default.
 pref("template", "");
+// The templates the user saved for later: a JSON array of
+// { "id": …, "name": …, "template": … }. Empty = none saved yet.
+pref("templates", "[]");
 // The picture of a "框选" annotation is a screenshot of the page — several
 // times as big as it needs to be. "0" sends it as it is; the quality is
 // the JPEG quality in percent.
