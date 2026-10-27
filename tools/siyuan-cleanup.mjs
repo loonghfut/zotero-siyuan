@@ -10,6 +10,11 @@
  *   node tools/siyuan-cleanup.mjs --workspace D:\SiYuan\workspace --ids 2026...,2026...
  *   node tools/siyuan-cleanup.mjs --workspace D:\SiYuan\workspace --marker ZoteroSiYuanSelfTest
  *   node tools/siyuan-cleanup.mjs --workspace D:\SiYuan\workspace --list
+ *
+ * The workspace may also come from the `SIYUAN_WORKSPACE` environment
+ * variable, or from SiYuan itself: `siyuan workspace info` answers with
+ * the workspace that is open right now. There is no built-in path — one
+ * that is right on a single machine is wrong on every other one.
  */
 import { readFileSync, readdirSync, existsSync } from "node:fs";
 import { join } from "node:path";
@@ -21,7 +26,6 @@ function option(name, fallback = "") {
 	return at === -1 ? fallback : args[at + 1];
 }
 
-const workspace = option("workspace", "D:\\siyi");
 const ids = option("ids")
 	.split(",")
 	.map((s) => s.trim())
@@ -45,15 +49,80 @@ function findCLI() {
 	return "";
 }
 
-function cli(args) {
+// The workspace the commands work on. It is filled in below, once the
+// three sources have been asked — but `cli()` needs it, so the name has to
+// exist before the first call.
+let workspace = "";
+
+/**
+ * Run the siyuan CLI.
+ *
+ * @param {String[]} argv - the command and its arguments
+ * @param {Boolean} [withWorkspace] - append `-w <workspace>`; off for the
+ *   commands that ask *about* the workspace
+ * @returns {String} what the command printed
+ */
+function cli(argv, withWorkspace = true) {
 	const executable = findCLI();
 	if (!executable) {
 		throw new Error("the siyuan CLI was not found");
 	}
-	return execFileSync(executable, args.concat(["-w", workspace]), {
+	const full =
+		withWorkspace && workspace ? argv.concat(["-w", workspace]) : argv;
+	return execFileSync(executable, full, {
 		encoding: "utf8",
 		stdio: ["ignore", "pipe", "pipe"],
 	});
+}
+
+/* -------------------------------------------------------- the workspace */
+
+/**
+ * The workspace to work in.
+ *
+ * Three sources, in this order:
+ *
+ *   1. `--workspace` on the command line — the explicit one wins
+ *   2. the `SIYUAN_WORKSPACE` environment variable
+ *   3. SiYuan itself: `siyuan workspace info` answers with the workspace
+ *      that is open right now
+ *
+ * A path that is built into the script is right on exactly one machine and
+ * wrong on every other one — and a wrong one only shows up much later, as
+ * "the daily note was not found".
+ *
+ * @returns {String} the workspace directory, or "" when there is none
+ */
+function resolveWorkspace() {
+	const explicit = String(option("workspace", "") || "").trim();
+	if (explicit) {
+		return explicit;
+	}
+	const fromEnv = String(process.env.SIYUAN_WORKSPACE || "").trim();
+	if (fromEnv) {
+		return fromEnv;
+	}
+	// SiYuan knows which workspace it has open — that is the one the user
+	// is looking at, and asking it beats guessing a path.
+	try {
+		const data = JSON.parse(cli(["workspace", "info", "--format", "json"], false));
+		return String((data && data.path) || "").trim();
+	}
+	catch (e) {
+		return "";
+	}
+}
+
+workspace = resolveWorkspace();
+
+if (!workspace) {
+	console.error(
+		"No SiYuan workspace.\n" +
+			"Give one on the command line, or in the environment:\n" +
+			'  node tools/siyuan-cleanup.mjs --workspace "D:\\SiYuan\\workspace"\n' +
+			"  set SIYUAN_WORKSPACE=D:\\SiYuan\\workspace",
+	);
+	process.exit(1);
 }
 
 /* ------------------------------------------------- locate today's note file */

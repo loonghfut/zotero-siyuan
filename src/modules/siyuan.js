@@ -142,7 +142,7 @@ export class SiYuanCLI extends SiYuanProcess {
    * Append Markdown to a document and return the id of the block it made.
    *
    * `block append` is the only command that says which block it created:
-   * its JSON answer is `{ "id": "20261026173312-7zsvcqk" }`. For a
+   * its JSON answer is `{ "id": "20260101000000-abcdefg" }`. For a
    * multi-block Markdown the id is the first block of it — the one a
    * "open in SiYuan" link should point at.
    *

@@ -123,13 +123,24 @@ section("SiYuan HTTP fallback discovery");
   // The kernel counts *failed* authentications and locks itself out after
   // too many of them, so this must try the configured workspace first and
   // stop after a couple of tries — exactly like the plugin does.
-  const preferred = process.env.SIYUAN_WORKSPACE || "D:\\siyi";
+  //
+  // The configured workspace comes from the environment, not from a path
+  // that is built into this file: a hardcoded one is right on exactly one
+  // machine, and it would put that machine's directory layout into the
+  // repository.
+  const preferred = String(process.env.SIYUAN_WORKSPACE || "").trim();
   const appDirs = [
     join(home, ".config", "siyuan"),
     join(home, "Library", "Application Support", "siyuan"),
     join(home, "AppData", "Roaming", "siyuan"),
   ];
-  const workspaces = [];
+  // The workspace candidates, in the order they are tried: the configured
+  // workspace first, then the ones SiYuan's own "recent workspaces" list
+  // knows.
+  const workspaceCandidates = [];
+  if (preferred) {
+    workspaceCandidates.push(preferred);
+  }
   for (const appDir of appDirs) {
     const listPath = join(appDir, "workspace.json");
     if (!existsSync(listPath)) continue;
@@ -142,17 +153,24 @@ section("SiYuan HTTP fallback discovery");
     }
     for (const entry of list) {
       const dir = typeof entry === "string" ? entry : entry.path;
-      if (dir && !workspaces.includes(dir)) workspaces.push(dir);
+      if (dir && !workspaceCandidates.includes(dir)) {
+        workspaceCandidates.push(dir);
+      }
     }
   }
-  workspaces.sort((a, b) => (a === preferred ? -1 : b === preferred ? 1 : 0));
 
   let found = null;
   const errors = [];
   let attempts = 0;
-  for (const dir of workspaces) {
+  // How many candidates really hold a SiYuan configuration. A candidate
+  // that has none is not a workspace — it is a path that does not point at
+  // SiYuan, and it must not turn "SiYuan is not installed here" into a
+  // failure.
+  let usable = 0;
+  for (const dir of workspaceCandidates) {
     const confPath = join(dir, "conf", "conf.json");
     if (!existsSync(confPath)) continue;
+    usable++;
     let conf;
     try {
       conf = JSON.parse(readFileSync(confPath, "utf8"));
@@ -205,7 +223,7 @@ section("SiYuan HTTP fallback discovery");
       `         → ${found.dir} (port ${found.port}, notebooks: ${found.notebooks.join(", ")})`,
     );
   }
-  else if (!workspaces.length) {
+  else if (!usable) {
     // No SiYuan on this machine — nothing to discover. A CI runner has
     // none, and "the workspace could not be found" there is a fact about
     // the runner, not a defect of the plugin.
@@ -249,10 +267,10 @@ section("The write path names its block");
 
   check(
     "a block id is recognized",
-    isBlockID("20261026173312-7zsvcqk") &&
-      !isBlockID("20261026173312") &&
+    isBlockID("20260101000000-abcdefg") &&
+      !isBlockID("20260101000000") &&
       !isBlockID("[object Object]") &&
-      blockCreatedAt("20261026173312-7zsvcqk") === "20261026173312",
+      blockCreatedAt("20260101000000-abcdefg") === "20260101000000",
   );
 
   // The real answer of /api/block/appendDailyNoteBlock.
@@ -262,29 +280,29 @@ section("The write path names its block");
       doOperations: [
         {
           action: "insert",
-          id: "20261026173329-lj2kzr6",
-          parentID: "20261026121440-rw08hra",
+          id: "20260101000000-bbbbbbb",
+          parentID: "20260101000000-ccccccc",
           rootID: "",
-          data: "<div data-node-id=\"20261026173329-lj2kzr6\"></div>",
+          data: "<div data-node-id=\"20260101000000-bbbbbbb\"></div>",
         },
       ],
     },
   ];
   check(
     "the ids are read out of the kernel's transactions",
-    extractAppendResult(transactions).blockID === "20261026173329-lj2kzr6" &&
+    extractAppendResult(transactions).blockID === "20260101000000-bbbbbbb" &&
       extractAppendResult(transactions).documentID ===
-        "20261026121440-rw08hra",
+        "20260101000000-ccccccc",
   );
   check(
     "a plain id is accepted as well",
-    extractAppendResult("20261026173329-lj2kzr6").blockID ===
-      "20261026173329-lj2kzr6",
+    extractAppendResult("20260101000000-bbbbbbb").blockID ===
+      "20260101000000-bbbbbbb",
   );
   check(
     "an object answer is searched too",
-    extractAppendResult({ id: "20261026173312-7zsvcqk" }).blockID ===
-      "20261026173312-7zsvcqk",
+    extractAppendResult({ id: "20260101000000-abcdefg" }).blockID ===
+      "20260101000000-abcdefg",
   );
   check(
     "an answer without an id does not invent one",

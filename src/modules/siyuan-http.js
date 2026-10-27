@@ -183,8 +183,8 @@ export class SiYuanHTTP {
    * The kernel answers with an **array of transactions**, not with a block
    * id:
    *
-   *   [{ "doOperations": [{ "id": "20261026173329-lj2kzr6",
-   *                         "parentID": "20261026121440-rw08hra", … }] }]
+   *   [{ "doOperations": [{ "id": "20260101000000-bbbbbbb",
+   *                         "parentID": "20260101000000-ccccccc", … }] }]
    *
    * Taking that array as the id would put `[object Object]` into every
    * `siyuan://blocks/…` link, so the id is read out of it — and an answer

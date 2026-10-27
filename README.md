@@ -476,7 +476,7 @@ zotero-siyuan/
 
 | | |
 |---|---|
-| Zotero | 7.0 及以上（已在本机 Zotero 10.0.6 上核对 API） |
+| Zotero | 7.0 及以上（已在 Zotero 7 与 10 上核对 API） |
 | 思源笔记 | 3.7 及以上（`siyuan` 命令行随内核附带） |
 | Node.js | 22.8 及以上（构建用；构建工具 `zotero-plugin-scaffold` 的要求） |
 
@@ -730,6 +730,11 @@ renderSidebarAnnotationHeader 事件 → 真的按钮 → 真的 click()
 node tools/siyuan-cleanup.mjs --workspace "D:\SiYuan\workspace" --list
 node tools/siyuan-cleanup.mjs --workspace "D:\SiYuan\workspace" --marker ZoteroSiYuanSelfTest
 ```
+
+> 工作空间可以省略：`--workspace` 不给时，脚本先看环境变量 `SIYUAN_WORKSPACE`，
+> 再问思源自己（`siyuan workspace info` 回答当前打开的是哪个工作空间）。
+> 脚本里**没有写死任何路径** —— 写死的路径只在一台机器上是对的，
+> 而错了以后要等到"找不到今天的日记"才看得出来。
 
 ## 安装
 

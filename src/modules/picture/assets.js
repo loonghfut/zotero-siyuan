@@ -5,7 +5,7 @@
  * The picture goes into the SiYuan workspace's `data/assets` folder, and
  * the Markdown refers to it the way SiYuan does it:
  *
- *     ![框选](assets/zotero-siyuan-ABCD1234-20261026130000.png)
+ *     ![框选](assets/zotero-siyuan-ABCD1234-20260101000000.png)
  *
  * The kernel picks that up on its own: it registers the file in its own
  * asset list and links it to the block that refers to it. (Verified with
