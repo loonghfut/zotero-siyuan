@@ -1,5 +1,8 @@
 # Zotero → SiYuan
 
+[![CI](https://github.com/loonghfut/zotero-siyuan/actions/workflows/ci.yml/badge.svg)](https://github.com/loonghfut/zotero-siyuan/actions/workflows/ci.yml)
+[![Release](https://github.com/loonghfut/zotero-siyuan/actions/workflows/release.yml/badge.svg)](https://github.com/loonghfut/zotero-siyuan/actions/workflows/release.yml)
+
 把 Zotero PDF 阅读器侧边栏里的**注释（annotation）和它上面的评论（comment）**，一键写进
 **思源笔记当天的日记**。
 
@@ -574,7 +577,7 @@ npm run ci        # build:ci + check
 | `ci.yml` | 推 `main`、提 PR、手动触发 | Ubuntu + Windows 各跑一遍：装依赖 → 构建 → 静态闸门 → 把 XPI 存成产物 |
 | `release.yml` | 推 `v*` 标签（或手动触发） | 构建 → 核对标签与版本号一致 → 生成 `update.json` → 发 GitHub Release |
 
-**CI 的构建不动版本号。** 本地 `npm run build` 每build 一次都会把版本号 +1
+**CI 的构建不动版本号。** 本地 `npm run build` 每构建一次都会把版本号 +1
 （Firefox 认缓存，同版本号换 XPI 可能不生效）；CI 用的是 `npm run build:ci`
 （`tools/bump-version.mjs --no-bump`），它**验证已提交的源码**，所以工作区必须
 保持干净 —— 流水线里那句 `git diff --exit-code` 就是守这个的。
@@ -604,6 +607,60 @@ git tag v0.2.96 && git push origin main --tags
 所以**只要发了 Release，Zotero 就能自己找到新版本**。
 
 > `update.json` 是构建产物，根目录那一份在 `.gitignore` 里。
+
+### 怎么用：日常一次改动要走完的流程
+
+```bash
+# 1. 改代码，然后本地先跑一遍 CI 跑的那两步（和流水线里一模一样）
+npm run ci          # = build:ci + check，产物是 zotero-siyuan.xpi
+
+# 2. 提交、推送
+git add -A && git commit -m "feat: …"
+git push origin main
+```
+
+推上去以后：
+
+- **打开仓库的 Actions 页**（`https://github.com/loonghfut/zotero-siyuan/actions`），
+  最新的那次 CI 在最上面。点进去能看到 Ubuntu 和 Windows 两列各自的日志。
+- **绿勾 = 通过**。红叉就点进去看是哪一步：`Run the static checks` 失败时，
+  日志里会有一行 `[FAIL] <检查名> — <原因>`，把它抄到本地跑 `npm run check` 就能复现。
+- **想手动跑一次**：Actions 页右上角 `Run workflow` → 选分支 → `Run workflow`。
+- **拿构建好的 XPI**：CI 跑完的那次运行底部有 `Artifacts`，下载
+  `zotero-siyuan-windows-latest` 之类的压缩包，里面就是 `zotero-siyuan.xpi`。
+  想直接拿文件，也可以用 Release 里的那个（见下）。
+
+> **CI 失败时先看 `Run the static checks`**，不是看 `Build the XPI` ——
+> 构建这一步在本地也是同一条命令，出问题的话本地早就发现了。
+> 只有「The build left the sources alone」这一步是 CI 独有的：
+> 它说明构建**改了受版本控制的文件**，通常是版本号被动了。
+
+### 怎么用：发一个正式版本
+
+```bash
+# 1. 版本号 +1（会写进 manifest / package.json / src/version.js）
+npm run build
+
+# 2. 本地验一遍
+npm run ci
+
+# 3. 提交 + 打标签 + 推
+git add -A
+git commit -m "chore(release): v0.2.96"
+git push origin main
+git tag v0.2.96
+git push origin v0.2.96
+```
+
+推上标签后 `release.yml` 会跑，结束后：
+
+- 仓库的 **Releases** 页会多出一条 `v0.2.96`，挂着 `zotero-siyuan.xpi` 和 `update.json`；
+- **Zotero 里的插件会自动找到新版本**（设置 → 插件 → 齿轮 → 检查更新）。
+
+> **标签必须等于版本号。** `tools/check-release-version.mjs` 会核对
+> `v0.2.96` == `package.json` 里的 `0.2.96`，对不上就**拒绝发布**。
+> 标签打错了就把它删掉重打：
+> `git tag -d v0.2.96 && git push origin --delete v0.2.96`。
 
 ## 端到端自检
 

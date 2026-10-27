@@ -36,10 +36,10 @@ jobs:
         os: [ubuntu-latest, windows-latest]
     steps:
       - name: Check out the sources
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Set up Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v5
         with:
           # The build tool (zotero-plugin-scaffold) asks for Node 22.8 or
           # newer; the README says the same.
@@ -59,7 +59,7 @@ jobs:
         run: npm run check
 
       - name: Upload the XPI
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: zotero-siyuan-${{ matrix.os }}
           path: zotero-siyuan.xpi

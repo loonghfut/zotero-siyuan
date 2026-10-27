@@ -28,12 +28,12 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Check out the sources
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           ref: ${{ github.event.inputs.tag || github.ref }}
 
       - name: Set up Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v5
         with:
           node-version: "22"
           cache: npm
@@ -61,6 +61,10 @@ jobs:
             # A re-run of the workflow: replace what is there.
             gh release upload "$TAG" zotero-siyuan.xpi update.json --clobber
           else
+            # `--verify-tag`: the tag has to exist already. Without it
+            # `gh` would *make* one pointing at the default branch — and
+            # publish a release that is not the code that was checked.
             gh release create "$TAG" zotero-siyuan.xpi update.json \
+              --verify-tag \
               --title "Zotero → SiYuan $TAG" --generate-notes
           fi
