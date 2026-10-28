@@ -40,6 +40,7 @@ import itemActions from "./app/item-actions.js";
 import itemAnnotations from "./app/item-annotations.js";
 import itemMenu from "./app/item-menu.js";
 import itemNotify from "./app/item-notify.js";
+import itemPictures from "./app/item-pictures.js";
 import itemSections from "./app/item-sections.js";
 import itemSend from "./app/item-send.js";
 import lookup from "./app/lookup.js";
@@ -400,6 +401,7 @@ Object.assign(
   itemAnnotations,
   itemMenu,
   itemNotify,
+  itemPictures,
   itemSections,
   itemSend,
   lookup,

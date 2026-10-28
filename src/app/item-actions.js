@@ -68,27 +68,31 @@ export default {
   async _sendItemNotes(item) {
     const pdfs = await this._pdfAttachments(item);
     const vars = await this._itemVars(item, pdfs[0] || null);
-    const notes = await this._itemNotes(item);
-    if (!notes.length) {
-      this._notifyItemInfo(
-        getString("zoteroSiYuan-item-no-notes", "This item has no notes."),
+    // The notes may bring pictures with them; the send holds on to them
+    // until SiYuan has the note that refers to them.
+    return await this._withItemPictures(async () => {
+      const notes = await this._itemNotes(item);
+      if (!notes.length) {
+        this._notifyItemInfo(
+          getString("zoteroSiYuan-item-no-notes", "This item has no notes."),
+        );
+        return null;
+      }
+      const text = notesMarkdown(
+        vars,
+        notes,
+        this._itemSectionTemplate("itemNotesTemplate"),
       );
-      return null;
-    }
-    const text = notesMarkdown(
-      vars,
-      notes,
-      this._itemSectionTemplate("itemNotesTemplate"),
-    );
-    if (!text) {
-      this._notifyItemInfo(
-        getString("zoteroSiYuan-item-no-notes", "This item has no notes."),
-      );
-      return null;
-    }
-    return await this._sendItemMarkdown(item, text, {
-      vars,
-      section: ITEM_SECTION_NOTES,
+      if (!text) {
+        this._notifyItemInfo(
+          getString("zoteroSiYuan-item-no-notes", "This item has no notes."),
+        );
+        return null;
+      }
+      return await this._sendItemMarkdown(item, text, {
+        vars,
+        section: ITEM_SECTION_NOTES,
+      });
     });
   },
 

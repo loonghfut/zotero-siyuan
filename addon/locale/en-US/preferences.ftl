@@ -64,11 +64,11 @@ pref-auto-queue-left = %d could not be sent yet; they will be retried automatica
 pref-auto-queue-sent = %d sent from the queue
 pref-auto-queue-hint = When SiYuan is not running or a write fails, an automatically sent annotation goes into the pending queue. It is retried on the next start, and as soon as any send succeeds. Turning automatic sending off pauses the queue.
 
-pref-picture-title = Area-selection pictures
+pref-picture-title = Pictures
 pref-image-compress = Compress the picture before sending
 pref-image-quality = Compression quality
 pref-image-saved = Saved
-pref-picture-hint = The picture of an area selection is a screenshot of the page, with an alpha channel that is completely opaque — several times as big as it needs to be. It is turned into a JPEG before it is sent, which usually leaves about a fifth of it; the original is kept when that is not smaller. The quality is yours to choose: the smaller the number, the smaller and rougher the picture; 100 is the biggest and the clearest.
+pref-picture-hint = Area-selection screenshots and the pictures inside child notes are both compressed with these settings before they are sent. An area selection is a screenshot of the page, with an alpha channel that is completely opaque — several times as big as it needs to be; it is turned into a JPEG, which usually leaves about a fifth of it, and the original is kept when that is not smaller. The quality is yours to choose: the smaller the number, the smaller and rougher the picture; 100 is the biggest and the clearest.
 
 pref-template-title = Send template
 pref-template-scope = Template for

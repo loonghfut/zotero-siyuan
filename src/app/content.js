@@ -110,6 +110,24 @@ export default {
   },
 
   /**
+   * How a picture is sent: compressed or not, and how hard.
+   *
+   * There is one answer for both kinds of picture — the screenshot of an
+   * area selection and the pictures inside a child note. They are the same
+   * kind of thing to the user, so one setting covers them; keeping the
+   * reading in one place is what makes "the same setting" true instead of
+   * two copies that happen to agree today.
+   *
+   * @returns {{compress: Boolean, quality: Number}} quality is 0…1
+   */
+  _pictureSettings() {
+    return {
+      compress: prefFlag("imageCompress", true),
+      quality: Number(getPref("imageQuality", "82")) / 100,
+    };
+  },
+
+  /**
    * The picture of an area selection, ready to be put into the workspace.
    *
    * Zotero keeps the cropped picture in its cache; the reader also hands
@@ -234,8 +252,7 @@ export default {
       // times as big as it needs to be. It is compressed before it goes
       // into the workspace, and the original is kept when that does not
       // make it smaller.
-      const compress = prefFlag("imageCompress", true);
-      const quality = Number(getPref("imageQuality", "82")) / 100;
+      const { compress, quality } = this._pictureSettings();
       const picture = await exportPicture(
         workspace,
         source,

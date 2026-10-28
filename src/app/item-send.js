@@ -21,6 +21,7 @@ import {
   collectMetadata,
 } from "../modules/metadata.js";
 import { noteHtmlToMarkdown } from "../modules/item-note.js";
+import { rewriteNoteImages } from "../modules/note-images.js";
 import { showToast } from "../modules/toast.js";
 
 export default {
@@ -83,6 +84,10 @@ export default {
    * `getNotes` throws on a note item — a note cannot have child notes — so
    * it is only asked of the item the user selected.
    *
+   * The pictures of a note are attachments of their own, which a Markdown
+   * reader cannot open. They go into the workspace first, and the note is
+   * converted with their new addresses in place — see `item-pictures.js`.
+   *
    * @param {Object} item - a regular item
    * @returns {Promise<String[]>}
    */
@@ -111,7 +116,11 @@ export default {
       catch (e) {
         html = "";
       }
-      const markdown = noteHtmlToMarkdown(html);
+      const assets = await this._noteImageAssets(
+        html,
+        Number(note.libraryID) || 0,
+      );
+      const markdown = noteHtmlToMarkdown(rewriteNoteImages(html, assets));
       if (markdown) {
         collected.push(markdown);
       }
@@ -495,59 +504,63 @@ export default {
   async _createItemNoteDocument(item) {
     const pdfs = await this._pdfAttachments(item);
     const vars = await this._itemVars(item, pdfs[0] || null);
-    const notes = await this._itemNotes(item);
-    const text = this._itemSectionMarkdown(vars, notes);
-    if (!text) {
-      this._notifyItemInfo(
-        getString(
-          "zoteroSiYuan-item-no-content",
-          "This item has nothing to put in its document.",
-        ),
-      );
-      return null;
-    }
     const itemKey = String(vars.itemKey || vars.attachmentKey || "");
     const libraryID = Number(vars.libraryID) || 0;
-    // The bubble is shown once, at the end: the annotations belong to the
-    // same answer, and two bubbles for one command read as two commands.
-    // The annotations are written by the follow-up, while the send lock is
-    // still held — the two halves of the sync are one unit.
-    const written = await this._sendItemMarkdown(item, text, {
-      itemDocument: true,
-      vars,
-      attrs: itemDocumentAttributes(itemKey, libraryID),
-      quiet: true,
-      followUp: async (result) => {
-        const destination = result.destination || {
-          kind: "item",
-          documentID: result.documentID || "",
-          title: String(vars.title || ""),
-        };
-        const documentID = destination.documentID || result.documentID || "";
-        if (!documentID || !prefFlag("itemSyncAnnotations", true)) {
-          return;
-        }
-        try {
-          const notebook = await this._resolveNotebook();
-          const synced = await this._syncItemAnnotations({
-            documentID,
-            notebook,
-            pdfs,
-          });
-          if (synced && synced.summary) {
-            result.annotationSummary = synced.summary;
+    // The notes may bring pictures with them; the whole sync is one unit,
+    // so the pictures are held until both halves have written.
+    const written = await this._withItemPictures(async () => {
+      const notes = await this._itemNotes(item);
+      const text = this._itemSectionMarkdown(vars, notes);
+      if (!text) {
+        this._notifyItemInfo(
+          getString(
+            "zoteroSiYuan-item-no-content",
+            "This item has nothing to put in its document.",
+          ),
+        );
+        return null;
+      }
+      // The bubble is shown once, at the end: the annotations belong to the
+      // same answer, and two bubbles for one command read as two commands.
+      // The annotations are written by the follow-up, while the send lock is
+      // still held — the two halves of the sync are one unit.
+      return await this._sendItemMarkdown(item, text, {
+        itemDocument: true,
+        vars,
+        attrs: itemDocumentAttributes(itemKey, libraryID),
+        quiet: true,
+        followUp: async (result) => {
+          const destination = result.destination || {
+            kind: "item",
+            documentID: result.documentID || "",
+            title: String(vars.title || ""),
+          };
+          const documentID = destination.documentID || result.documentID || "";
+          if (!documentID || !prefFlag("itemSyncAnnotations", true)) {
+            return;
           }
-        }
-        catch (e) {
-          Zotero.logError(
-            `ZoteroSiYuan: the annotations could not be synced: ${e}`,
-          );
-          result.annotationWarning = getString(
-            "zoteroSiYuan-item-annotations-sync-failed",
-            "The annotations could not be synced; the details are in SiYuan.",
-          );
-        }
-      },
+          try {
+            const notebook = await this._resolveNotebook();
+            const synced = await this._syncItemAnnotations({
+              documentID,
+              notebook,
+              pdfs,
+            });
+            if (synced && synced.summary) {
+              result.annotationSummary = synced.summary;
+            }
+          }
+          catch (e) {
+            Zotero.logError(
+              `ZoteroSiYuan: the annotations could not be synced: ${e}`,
+            );
+            result.annotationWarning = getString(
+              "zoteroSiYuan-item-annotations-sync-failed",
+              "The annotations could not be synced; the details are in SiYuan.",
+            );
+          }
+        },
+      });
     });
     if (!written) {
       return null;

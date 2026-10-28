@@ -299,6 +299,28 @@ problem 返回，设置页的「检查」区域直接显示出来（例如 “th
 清单；设置页的「模板用途」在 `note` / `item` / `info` / `abstract` / `notes` 五者之间切换，
 `template-store.js` 的 `TEMPLATE_SLOTS` 是与之一致的白名单。
 
+#### 子笔记里的图片
+
+Zotero 7 不把图片放在笔记 HTML 里：`<img>` 上只有 `data-attachment-key`，图片本身是
+这条笔记下面的一个独立附件（`linkMode = 4`，`storage:image.png`）。旧版笔记则可能把
+图片写成 `data:image/…` 的 data URL。两种都不是思源能直接打开的地址。
+
+`_itemNotes` 因此先让 `app/item-pictures.js` 的 `_noteImageAssets` 把图片搬进
+workspace。`modules/note-images.js` 只从 HTML 里认图片（`noteImageRefs`，同一张图只算
+一次）；`_noteImageSource` 用笔记所在 library 的 `getByLibraryAndKeyAsync` +
+`getFilePathAsync` 取文件，或者直接用 data URL；之后走的是和框选**同一条**
+`exportPicture`（压缩设置也共用）。`rewriteNoteImages` 把 `src` 换成 `assets/…`，
+再交给 `noteHtmlToMarkdown`——最后写进思源的就是普通的
+`![](assets/zotero-siyuan-note-XXXX.png)`。
+
+文件名**不带时间戳**：一次同步会重写整个笔记区段，带时间戳的话每同步一次就在 `assets`
+里多一份副本；按附件 key（或 data URL 的摘要）命名，同一张图始终落在同一个文件上。
+
+`_withItemPictures` 把「建图 + 写笔记」包成一段，并记在**自己的清单**上（注释同步在
+写入过程中也会改 `_batchPictures`）：写成功就留下图片，写失败（且不是
+`writeState: "unknown"`）就 `_dropPictures` 收回。图片找不到或放不进去只是少一张图，
+笔记照写。
+
 #### 注释的增量同步（`app/item-annotations.js`）
 
 「同步这篇文献」写完信息/摘要/笔记后，在**同一个发送锁**里（`_sendItemMarkdown` 的
@@ -441,6 +463,11 @@ pictureMarkdown(assetPath, alt)      生成 ![](assets/…) 插入正文
 ```
 
 **图片丢了不能连正文一起丢**：找不到图只是没有图，注释和评论照发。
+
+压缩设置只有一处读取：`content.js` 的 `_pictureSettings()` 返回
+`{ compress: imageCompress, quality: imageQuality / 100 }`。框选截图和子笔记里的图片
+（`item-pictures.js`）都调它，所以设置页里的「图片」一节对两者同时生效——不是两份恰好
+相同的偏好读取。
 
 ---
 

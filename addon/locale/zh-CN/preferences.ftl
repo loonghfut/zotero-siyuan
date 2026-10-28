@@ -64,11 +64,11 @@ pref-auto-queue-left = 还有 %d 条没能发送，稍后会自动重试
 pref-auto-queue-sent = 补发了 %d 条
 pref-auto-queue-hint = 思源没启动或写入失败时，自动发送的注释会进入待发队列；下次启动、或任意一次发送成功后自动重试。上面的自动发送开关关闭时，队列会暂停。
 
-pref-picture-title = 框选图片
+pref-picture-title = 图片
 pref-image-compress = 发送前压缩图片
 pref-image-quality = 压缩质量
 pref-image-saved = 已保存
-pref-picture-hint = 框选注释的截图是页面截图，带一条其实全不透明的透明通道，体积是需要的几倍。压缩后转成 JPEG 再发出去，通常只剩两成左右；压缩后反而更大时保留原图。质量可以自己调：数字越小越小越糙，100 最大最清楚。
+pref-picture-hint = 框选注释的截图、子笔记里的图片，都按这里的设置压缩后再发出去。框选截图是页面截图，带一条其实全不透明的透明通道，体积是需要的几倍；压缩后转成 JPEG，通常只剩两成左右，压缩后反而更大时保留原图。质量可以自己调：数字越小越糙，100 最大最清楚。
 
 pref-template-title = 发送模板
 pref-template-scope = 模板用途

@@ -149,7 +149,7 @@ export function decodeEntities(text) {
 }
 
 /** The attributes of an opening tag. */
-function parseAttributes(text) {
+export function parseAttributes(text) {
   const attrs = {};
   const pattern =
     /([A-Za-z_:][-A-Za-z0-9_:.]*)\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'>]+))/g;
