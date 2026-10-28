@@ -75,6 +75,21 @@ export const TEMPLATE_VARIABLES = [
 		group: "组合",
 		hint: "作者/年份/出处/页码/批注人/来源，整块",
 	},
+	{
+		name: "metadataCallout",
+		group: "组合",
+		hint: "上面那块，每行自动加 “> ”（用于文献信息区段）",
+	},
+
+	// the sections of a literature note
+	{ name: "itemInfoLabel", group: "文献区段", hint: "「文献信息」这四个字的标题" },
+	{ name: "itemAbstractLabel", group: "文献区段", hint: "「摘要」这个标题" },
+	{ name: "itemNotesLabel", group: "文献区段", hint: "「笔记」这个标题" },
+	{ name: "abstractCallout", group: "文献区段", hint: "摘要，每行自动加 “> ”" },
+	{ name: "note", group: "文献区段", hint: "一条子笔记（Markdown，原样输出）" },
+	{ name: "noteCallout", group: "文献区段", hint: "一条子笔记，每行自动加 “> ”" },
+	{ name: "noteInline", group: "文献区段", hint: "一条子笔记，转义成一行" },
+	{ name: "noteNumber", group: "文献区段", hint: "这条子笔记的序号，从 1 开始" },
 ];
 
 /**
@@ -401,6 +416,30 @@ export function templateVariables(template) {
  */
 export function knownVariableNames() {
 	return TEMPLATE_VARIABLES.map((variable) => variable.name);
+}
+
+/**
+ * A short, stable fingerprint of a template.
+ *
+ * A sync can skip a note whose annotation did not change — but the note is
+ * rendered from a template, and editing the template changes the note
+ * without changing the annotation. The fingerprint goes into the block's
+ * attributes, so "the annotation is unchanged and so is the template" is
+ * one comparison.
+ *
+ * @param {String} text
+ * @returns {String} eight hex digits
+ */
+export function templateFingerprint(text) {
+	// FNV-1a: tiny, dependency-free, and stable across sessions — the value
+	// is written to the workspace, so it has to mean the same thing later.
+	let hash = 0x811c9dc5;
+	const source = String(text || "");
+	for (let i = 0; i < source.length; i++) {
+		hash ^= source.charCodeAt(i);
+		hash = Math.imul(hash, 0x01000193) >>> 0;
+	}
+	return hash.toString(16).padStart(8, "0");
 }
 
 /**

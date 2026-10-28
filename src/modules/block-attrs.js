@@ -26,6 +26,15 @@ export const ITEM_KEY_ATTR = "custom-zotero-item-key";
 /** The PDF attachment the annotation lives on. */
 export const ATTACHMENT_KEY_ATTR = "custom-zotero-attachment-key";
 
+/**
+ * The Zotero library an item belongs to.
+ *
+ * Zotero keys are unique inside a library, not across libraries: a group
+ * library and "My Library" can both hold `ABCD1234`. Every attribute that
+ * identifies an item therefore has to be read together with this one.
+ */
+export const LIBRARY_ID_ATTR = "custom-zotero-library-id";
+
 /** The annotation's colour, as the hex value Zotero stores. */
 export const COLOR_ATTR = "custom-zotero-color";
 
@@ -40,6 +49,24 @@ export const MODIFIED_ATTR = "custom-zotero-modified";
 
 /** Which part of a literature note a block belongs to. */
 export const SECTION_ATTR = "custom-zsi-section";
+
+/**
+ * The template a block was rendered with, as a short fingerprint.
+ *
+ * A literature-note sync skips an annotation whose text has not changed —
+ * but when the template changes, every note has to be rendered again, and
+ * the annotation's own timestamp cannot say that. The fingerprint can.
+ */
+export const TEMPLATE_ATTR = "custom-zsi-template";
+
+/** The sections an item-level send can write on its own. */
+export const ITEM_SECTION_INFO = "info";
+export const ITEM_SECTION_ABSTRACT = "abstract";
+export const ITEM_SECTION_NOTES = "notes";
+export const ITEM_SECTION_ANNOTATIONS = "annotations";
+
+/** The one container a literature-note sync writes. */
+export const ITEM_SECTION_DOCUMENT = "item";
 
 /**
  * The item a literature-note block belongs to.
@@ -139,6 +166,7 @@ export function annotationAttributes(vars = {}) {
 		[ANNOTATION_KEY_ATTR]: vars.annotationId || "",
 		[ITEM_KEY_ATTR]: vars.itemKey || "",
 		[ATTACHMENT_KEY_ATTR]: vars.attachmentKey || "",
+		[LIBRARY_ID_ATTR]: vars.libraryID ? String(vars.libraryID) : "",
 		[COLOR_ATTR]: vars.annotationColor || "",
 		[PAGE_ATTR]: vars.pageNumber ? String(vars.pageNumber) : "",
 		[TAGS_ATTR]: vars.annotationTags || "",
@@ -150,7 +178,8 @@ export function annotationAttributes(vars = {}) {
  * The annotation facts the index reads back from an IAL.
  *
  * @param {String} ial
- * @returns {{annotationKey: String, itemKey: String, attachmentKey: String}}
+ * @returns {{annotationKey: String, itemKey: String, attachmentKey: String,
+ *   libraryID: Number}}
  */
 export function annotationAttributesFromIAL(ial) {
 	const attrs = parseAttributes(ial);
@@ -158,6 +187,7 @@ export function annotationAttributesFromIAL(ial) {
 		annotationKey: attrs[ANNOTATION_KEY_ATTR] || "",
 		itemKey: attrs[ITEM_KEY_ATTR] || "",
 		attachmentKey: attrs[ATTACHMENT_KEY_ATTR] || "",
+		libraryID: Number(attrs[LIBRARY_ID_ATTR]) || 0,
 	};
 }
 
@@ -206,6 +236,29 @@ export function markBlock(markdown, attrs) {
 }
 
 /**
+ * The attributes of one section an item-level send writes on its own.
+ *
+ * These blocks are *not* marked with `custom-zsi-item-key`: that attribute
+ * belongs to the literature-note container, so a solo section can be found
+ * by its own name without being one of the sync's blocks. A sync takes
+ * them over (`_soloItemSectionBlocks`) — they describe the same item, and
+ * two copies of the details in one document is not what a sync should
+ * leave behind.
+ *
+ * @param {String} section - `info`, `abstract`, `notes`, …
+ * @param {String} itemKey
+ * @param {Number} [libraryID]
+ * @returns {Object}
+ */
+export function itemSectionAttributes(section, itemKey = "", libraryID = 0) {
+	return {
+		[SECTION_ATTR]: section || "",
+		[ITEM_KEY_ATTR]: itemKey || "",
+		[LIBRARY_ID_ATTR]: libraryID ? String(libraryID) : "",
+	};
+}
+
+/**
  * The attributes of the block one item-document sync writes.
  *
  * The whole sync — information, abstract and child notes — is one super
@@ -214,11 +267,13 @@ export function markBlock(markdown, attrs) {
  * never part of it.
  *
  * @param {String} itemKey
+ * @param {Number} [libraryID]
  * @returns {Object}
  */
-export function itemDocumentAttributes(itemKey = "") {
+export function itemDocumentAttributes(itemKey = "", libraryID = 0) {
 	return {
-		[SECTION_ATTR]: "item",
+		[SECTION_ATTR]: ITEM_SECTION_DOCUMENT,
 		[SECTION_ITEM_ATTR]: itemKey || "",
+		[LIBRARY_ID_ATTR]: libraryID ? String(libraryID) : "",
 	};
 }

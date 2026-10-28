@@ -240,11 +240,13 @@ appendPicture(text, image)    图片 Markdown 插到正文        ← _buildCont
 
 | 方法 | 内容 |
 |---|---|
-| `_sendItemInfo` | `itemInfoMarkdown(vars)` |
-| `_sendItemAbstract` | `abstractMarkdown(vars)` |
-| `_sendItemNotes` | 子笔记 HTML → Markdown（`noteHtmlToMarkdown`） |
+| `_sendItemInfo` | `itemInfoMarkdown(vars, itemInfoTemplate)` |
+| `_sendItemAbstract` | `abstractMarkdown(vars, abstract, itemAbstractTemplate)` |
+| `_sendItemNotes` | 子笔记 HTML → Markdown（`noteHtmlToMarkdown`），按 `itemNotesTemplate` 逐条渲染 |
 | `_sendItemAnnotations` | 汇总各 PDF 的注释 key，交给 `_sendMany`（和阅读器批量同一条路） |
-| `_syncItemDocument` | 固定走 `_resolveItemDocument`，把信息/摘要/笔记写进这篇文献的文档，并替换上一次同步写的那个块 |
+| `_syncItemDocument` | 固定走 `_resolveItemDocument`，把信息/摘要/笔记写进这篇文献的文档，随后增量同步注释 |
+
+前四个入口在 `app/item-actions.js`，写入本身仍在 `_sendItemMarkdown`。
 
 `_sendItemMarkdown` 按 `destination` 决定写哪里：`item`（或 `itemDocument: true`）用
 `_resolveItemDocument`，`document` 不需要笔记本，其余用 `_resolveDestination`。
@@ -255,8 +257,68 @@ appendPicture(text, image)    图片 Markdown 插到正文        ← _buildCont
 用户自己加的内容和注释笔记（带 `custom-zotero-*`）不受影响。旧块靠思源里的属性找回，
 不依赖 Zotero 状态，换机器也能继续替换。
 
+「发送条目信息 / 摘要 / 笔记」写的是 `custom-zsi-section="info|abstract|notes"` 的
+独立区段（`itemSectionAttributes`）。同步会**接管**这些块：`_soloItemSectionBlocks`
+按 `custom-zotero-item-key` + 三个区段名把它们查出来，和不带 section 的容器一起替换。
+没有这一步时，先后点单独发送和同步会在同一篇文档里留下两份信息/摘要/笔记。接管只按
+属性识别，用户手写的内容没有这些属性，仍然不动。
+
 条目级写入不经过 `_sendAnnotation`，所以不参与"已发送"检查、不建立注释索引——
 它送的是整条文献，不是某条注释。
+
+#### 原地更新（`app/block-update.js`）
+
+旧块只有一个时，同步不再"写新的、删旧的"，而是 `_updateBlock` 原地改写：块 ID 不变，
+指向它的链接、反向链接和索引记录都还成立，也没有"两份都在"的中间态。CLI 走
+`block update --id … --file … --format json`，HTTP 走 `/api/block/updateBlock`；
+两者都拒绝时才退回先写后删（`_replaceItemSection` 返回 `{updated:false, gone:false}`）。
+写不成功但**可能已经落盘**的（`isWriteUnknown`）直接抛出，不换传输重试，免得写两遍。
+
+思源的查询索引比写入慢一拍，所以"块没了"要问两次：`_blockRow` 第一次查不到时等
+1000 ms 再查，只有两次都没有才认定块已消失。解析器重建块时可能丢掉 IAL，
+`_setBlockAttrs` 会把缺的属性补回去——下一次同步正是靠这些属性找到它。
+
+#### 区段模板
+
+信息、摘要、笔记各有一个模板偏好（`itemInfoTemplate` / `itemAbstractTemplate` /
+`itemNotesTemplate`），空字符串表示用 `item-note.js` 里的内置写法。渲染入口是
+`item-sections.js` 的 `_itemSectionMarkdown(vars, notes)`，它把三个偏好分别交给
+`itemInfoMarkdown` / `abstractMarkdown` / `notesMarkdown`。`notesMarkdown` 对**每条**
+子笔记渲染一次，所以 `{{note}}`、`{{noteCallout}}`、`{{noteNumber}}` 是逐条的值。
+`{{metadataCallout}}` / `{{abstractCallout}}` 只在有内容时才产生文本，内置模板用
+`{{#if}}` 包住它们，条目缺摘要时就不会留下一个空 callout。
+
+区段模板**不会替用户补正文**：模板里写了什么就写什么，没有正文变量就只写标题。
+少了正文的问题在编辑模板时提示——`missingBodyVariable(slot, template)`（`item-note.js`）
+认出笔记/摘要/信息各自需要的正文变量，`checkTemplate(template, slot)` 把它作为一条
+problem 返回，设置页的「检查」区域直接显示出来（例如 “the body is missing — add
+{{noteCallout}}”）。这比运行时悄悄补一段文字更可预期：模板是用户写的，位置也该由
+用户决定。
+
+区段模板和通用模板存的是同一套变量，`template.js` 的 `TEMPLATE_VARIABLES` 是唯一的
+清单；设置页的「模板用途」在 `note` / `item` / `info` / `abstract` / `notes` 五者之间切换，
+`template-store.js` 的 `TEMPLATE_SLOTS` 是与之一致的白名单。
+
+#### 注释的增量同步（`app/item-annotations.js`）
+
+「同步这篇文献」写完信息/摘要/笔记后，在**同一个发送锁**里（`_sendItemMarkdown` 的
+`followUp`，两半合成一个 promise 交给 `_trackInflight`）把注释也带进这篇文档。
+每条注释仍是一个单独的超级块，走和阅读器批量写入一样的渲染与属性，所以 ↗ 标记、索引、
+「打开」都照常工作；只是多带两个属性：`custom-zsi-section="annotations"` 和
+`custom-zsi-template`（模板指纹）。
+
+| 情况 | 处理 |
+|---|---|
+| 以前没写过 | 追加，并从这次写入返回的 `blockRows` 里读出块 ID 记进索引 |
+| `dateModified` 或模板指纹变了 | `_replaceItemSection` 原地改写，块 ID 不变 |
+| 原地改写被拒 | 新块先写成功，旧块进 `stale`，写入完成后才删 |
+| 注释已不在库里 | 只在写入都成功之后删它的块 |
+| 没有变化 | 不渲染、不写入 |
+
+列表查询只认 `custom-zsi-section="annotations"`，所以用户自己发进这篇文档的注释（带
+`custom-zotero-*`）永远不会被同步删掉。新块的 ID 优先来自写入返回的 `blockRows`；
+取不到时等 1200 ms 重新查一次（索引滞后），仍取不到也不算失败——下一次同步会找到它。
+偏好 `itemSyncAnnotations = "0"` 关掉这一段，只写信息/摘要/笔记。
 
 ---
 

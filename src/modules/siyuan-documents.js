@@ -68,6 +68,42 @@ export default {
   },
 
   /**
+   * The document that carries **every** one of the attributes.
+   *
+   * An item key alone is not enough: Zotero keys are unique inside a
+   * library, not across libraries, so the library id has to be part of the
+   * question. A document stamped by an older version has no library id —
+   * the caller falls back to `findDocumentByAttribute` for those.
+   *
+   * @param {Object} attrs - name → value
+   * @returns {Promise<String>} the document id, or ""
+   */
+  async findDocumentByAttributes(attrs = {}) {
+    const pairs = [];
+    for (const [name, value] of Object.entries(attrs || {})) {
+      const key = String(name || "").trim();
+      const wanted = String(value == null ? "" : value).trim();
+      if (!/^[A-Za-z0-9_-]+$/.test(key) || !wanted) {
+        continue;
+      }
+      pairs.push(
+        `ial LIKE '%${sqlString(key)}="${sqlString(wanted)}"%'`,
+      );
+    }
+    if (!pairs.length) {
+      return "";
+    }
+    const rows = await this.runJSON([
+      "sql",
+      "SELECT id FROM blocks " +
+        `WHERE type = 'd' AND ${pairs.join(" AND ")} ` +
+        "ORDER BY updated DESC LIMIT 1",
+    ]);
+    const row = Array.isArray(rows) ? rows[0] : null;
+    return row && isBlockID(row.id) ? row.id : "";
+  },
+
+  /**
    * Create a document.
    *
    * `document create` answers with the new document id (a bare string, not

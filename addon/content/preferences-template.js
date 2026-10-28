@@ -208,9 +208,12 @@ Object.assign(ZoteroSiYuanPreferences, {
       return;
     }
     var addon = Zotero.ZoteroSiYuan;
+    // The slot matters: the notes / info / abstract templates are checked
+    // for the variable that carries their body, not only for names and
+    // conditionals.
     var result =
       addon && addon.checkTemplate
-        ? addon.checkTemplate(template)
+        ? addon.checkTemplate(template, this._templateSlot)
         : { problems: [] };
     box.textContent = "";
     if (!result.problems || !result.problems.length) {
@@ -515,7 +518,8 @@ Object.assign(ZoteroSiYuanPreferences, {
     // A template is either the common one or the one for a document per
     // item. Loading it puts the editor back on the side it came from, or
     // an item template would quietly become the daily-note one.
-    var slot = entry.slot === "item" ? "item" : "note";
+    var slots = ["note", "item", "info", "abstract", "notes"];
+    var slot = slots.indexOf(entry.slot) === -1 ? "note" : entry.slot;
     if (slot !== this._templateSlot) {
       this._templateSlot = slot;
       var scope = document.getElementById(this.TEMPLATE_SCOPE_ID);

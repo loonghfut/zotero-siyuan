@@ -247,6 +247,46 @@ export default {
   },
 
   /**
+   * Load many items in one read, keeping the caller's order.
+   *
+   * `Items.getAsync` takes a list, so a paper with ten attachments used to
+   * cost ten data-layer round trips. A list read that fails falls back to
+   * one at a time rather than dropping the items.
+   *
+   * @param {Array<Number>} ids
+   * @returns {Promise<Object[]>}
+   */
+  async _loadItems(ids) {
+    const list = (ids || []).filter(
+      (id) => id !== undefined && id !== null,
+    );
+    if (!list.length) {
+      return [];
+    }
+    let items = [];
+    try {
+      const loaded = await Zotero.Items.getAsync(list);
+      items = Array.isArray(loaded) ? loaded : [loaded];
+    }
+    catch (e) {
+      items = [];
+      for (const id of list) {
+        const item = await this._loadItem(id);
+        if (item) {
+          items.push(item);
+        }
+      }
+    }
+    const byID = new Map();
+    for (const item of items) {
+      if (item && item.id !== undefined) {
+        byID.set(item.id, item);
+      }
+    }
+    return list.map((id) => byID.get(id)).filter(Boolean);
+  },
+
+  /**
    * The annotation's key.
    *
    * Zotero's protocol handler wants the *key* (`getByLibraryAndKey`), while

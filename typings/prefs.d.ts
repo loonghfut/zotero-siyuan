@@ -24,6 +24,10 @@ declare namespace _ZoteroTypes {
       "sentCache": string;
       "template": string;
       "itemTemplate": string;
+      "itemInfoTemplate": string;
+      "itemAbstractTemplate": string;
+      "itemNotesTemplate": string;
+      "itemSyncAnnotations": string;
       "templates": string;
       "imageCompress": string;
       "imageQuality": string;

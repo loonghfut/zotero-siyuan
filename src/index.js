@@ -32,10 +32,15 @@ import {
 	prefFlag,
 } from "./utils/prefs.js";
 
+import blockUpdate from "./app/block-update.js";
 import content from "./app/content.js";
 import destination from "./app/destination.js";
 import diagnosticsApi from "./app/diagnostics-api.js";
+import itemActions from "./app/item-actions.js";
+import itemAnnotations from "./app/item-annotations.js";
 import itemMenu from "./app/item-menu.js";
+import itemNotify from "./app/item-notify.js";
+import itemSections from "./app/item-sections.js";
 import itemSend from "./app/item-send.js";
 import lookup from "./app/lookup.js";
 import preferencesApi from "./app/preferences-api.js";
@@ -114,6 +119,10 @@ class ZoteroSiYuanAddon {
     // to look up — a title query is a full scan.
     this._itemDocs = new Map();
     this._documentCache = new Map();
+    // A document lookup that is running right now. Two sends of the same
+    // item can arrive together; without sharing the promise they would
+    // both create a document.
+    this._itemDocPending = new Map();
     // Reader documents the plugin has seen a render event for. Their sidebar
     // is redrawn by the reader itself, and every redraw hands the plugin the
     // event again — so they never have to be patched by hand.
@@ -347,6 +356,7 @@ class ZoteroSiYuanAddon {
     this._sending = false;
     this._batchMemo = null;
     this._itemDocs.clear();
+    this._itemDocPending.clear();
     this._documentCache.clear();
     this._busyDocs = new WeakSet();
     // The compressed pictures are kept in memory for a faster second send;
@@ -382,10 +392,15 @@ class ZoteroSiYuanAddon {
  */
 Object.assign(
   ZoteroSiYuanAddon.prototype,
+  blockUpdate,
   content,
   destination,
   diagnosticsApi,
+  itemActions,
+  itemAnnotations,
   itemMenu,
+  itemNotify,
+  itemSections,
   itemSend,
   lookup,
   preferencesApi,

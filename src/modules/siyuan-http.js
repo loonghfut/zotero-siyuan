@@ -250,6 +250,35 @@ export class SiYuanHTTP {
   }
 
   /**
+   * Replace the content of a block, keeping its id.
+   *
+   * Same error contract as `appendBlock`: a kernel that answered "no" wrote
+   * nothing, while a request without an answer may have been processed.
+   *
+   * @param {String} id
+   * @param {String} markdown
+   * @returns {Promise<void>}
+   */
+  async updateBlock(id, markdown) {
+    try {
+      await this.request("/api/block/updateBlock", {
+        id,
+        dataType: "markdown",
+        data: markdown,
+      });
+    }
+    catch (e) {
+      if (e && e.refused) {
+        throw e;
+      }
+      const error = new Error(e && e.message ? e.message : String(e));
+      error.writeState = "unknown";
+      error.written = true;
+      throw error;
+    }
+  }
+
+  /**
    * Create a document with Markdown.
    *
    * The legacy `createDocWithMd` endpoint is refused by a notebook that

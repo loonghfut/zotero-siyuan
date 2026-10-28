@@ -35,6 +35,16 @@ pref("template", "");
 // a per-item note is often a reading note with a different shape, but not
 // every user needs two of them.
 pref("itemTemplate", "");
+// The three sections of a literature note, each with a template of its own.
+// Empty = the built-in shape (a callout holding the metadata / the abstract
+// / each child note). The notes template is rendered once per note.
+pref("itemInfoTemplate", "");
+pref("itemAbstractTemplate", "");
+pref("itemNotesTemplate", "");
+// A literature-note sync brings the annotations along: new ones are added,
+// changed ones are updated in place, and the notes of deleted annotations
+// are removed. "0" keeps the sync to information / abstract / notes.
+pref("itemSyncAnnotations", "1");
 // The templates the user saved for later: a JSON array of
 // { "id": …, "name": …, "template": … }. Empty = none saved yet.
 pref("templates", "[]");

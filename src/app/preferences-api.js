@@ -26,6 +26,13 @@ import {
 	validateTemplate,
 } from "../modules/template.js";
 import {
+	DEFAULT_ABSTRACT_TEMPLATE,
+	DEFAULT_INFO_TEMPLATE,
+	DEFAULT_NOTES_TEMPLATE,
+	missingBodyVariable,
+	noteVars,
+} from "../modules/item-note.js";
+import {
 	TEMPLATES_PREF,
 	deleteSavedTemplate as removeFromShelf,
 	parseSavedTemplates,
@@ -171,9 +178,97 @@ export default {
     }));
   },
 
-  /** What is wrong with a template, if anything. */
-  checkTemplate(template) {
-    return validateTemplate(template);
+  /**
+   * The pref behind each template the pane can edit.
+   *
+   * One editor serves all of them: the switch decides which preference the
+   * box reads and writes, so the preview, the variables and the problem
+   * list keep working the same way for every one.
+   */
+  _templateSlotPref(slot) {
+    switch (String(slot || "")) {
+      case "item":
+        return "itemTemplate";
+      case "info":
+        return "itemInfoTemplate";
+      case "abstract":
+        return "itemAbstractTemplate";
+      case "notes":
+        return "itemNotesTemplate";
+      default:
+        return "template";
+    }
+  },
+
+  /**
+   * What a slot uses when its preference is empty.
+   *
+   * The common template has a built-in default. The per-item one is empty
+   * on purpose — it means "use the common one". The three section templates
+   * have a built-in shape each, so an empty preference shows that shape and
+   * changing it saves a copy.
+   */
+  _templateSlotDefault(slot) {
+    switch (String(slot || "")) {
+      case "item":
+        return this.getTemplate();
+      case "info":
+        return DEFAULT_INFO_TEMPLATE;
+      case "abstract":
+        return DEFAULT_ABSTRACT_TEMPLATE;
+      case "notes":
+        return DEFAULT_NOTES_TEMPLATE;
+      default:
+        return DEFAULT_TEMPLATE;
+    }
+  },
+
+  /** The template one slot really uses, whether or not it is stored. */
+  getTemplateForSlot(slot) {
+    const stored = String(
+      getPref(this._templateSlotPref(slot), "") || "",
+    ).trim();
+    if (stored) {
+      return stored;
+    }
+    return this._templateSlotDefault(slot);
+  },
+
+  /** Store one slot's template; the default is stored as "not customized". */
+  setTemplateForSlot(slot, template) {
+    const text = String(template == null ? "" : template);
+    const fallback = String(this._templateSlotDefault(slot) || "").trim();
+    const value = text.trim() && text.trim() !== fallback ? text : "";
+    return setPref(this._templateSlotPref(slot), value);
+  },
+
+  /** Forget one slot's template, so its built-in shape is used again. */
+  resetTemplateForSlot(slot) {
+    return setPref(this._templateSlotPref(slot), "");
+  },
+
+  /**
+   * What is wrong with a template, if anything.
+   *
+   * A section template is checked against its own section as well: a notes
+   * template that never names `{{noteCallout}}` writes the heading and
+   * drops every note. The pane has to say so while it is still being
+   * edited — the send does not put the text back on its own.
+   *
+   * @param {String} template
+   * @param {String} [slot] - `note`, `item`, `info`, `abstract`, `notes`
+   * @returns {{unknown: String[], unbalanced: Number, problems: String[]}}
+   */
+  checkTemplate(template, slot = "") {
+    const result = validateTemplate(template);
+    const missing = missingBodyVariable(slot, template);
+    if (missing) {
+      result.problems.push(
+        `the body is missing — add {{${missing}}}, or the content of this ` +
+          "section is not written",
+      );
+    }
+    return result;
   },
 
   /** The template in use — the user's, or the built-in default. */
@@ -347,19 +442,30 @@ export default {
    * The cheat sheet the preferences pane shows: every variable with its
    * explanation, plus the ones the current template actually uses.
    *
-   * @param {String} [slot] - "note" (the common template) or "item" (the
-   *   one for a document per item)
+   * @param {String} [slot] - "note" (the common template), "item" (the one
+   *   for a document per item), or one of the three literature-note
+   *   sections: "info", "abstract", "notes"
    */
   getTemplateHelp(slot = "note") {
-    // The editor edits one of the two templates; the item one is shown as
-    // it is stored, so an empty editor is exactly "use the common one".
-    const template = slot === "item"
-      ? this.getItemTemplate()
-      : this.getTemplate();
-    const used = templateVariables(template);
+    const name = ["note", "item", "info", "abstract", "notes"].includes(slot)
+      ? slot
+      : "note";
+    const stored = String(
+      getPref(this._templateSlotPref(name), "") || "",
+    );
+    const fallback = this._templateSlotDefault(name);
+    // The per-item slot is shown exactly as it is stored, so an empty box
+    // means "use the common template". The section slots show their
+    // built-in shape instead — a blank box there looks like a mistake.
+    const template = name === "item"
+      ? stored
+      : (stored || fallback);
+    const used = templateVariables(template || fallback);
     return {
+      slot: name,
       template,
-      defaultTemplate: DEFAULT_TEMPLATE,
+      stored,
+      defaultTemplate: fallback,
       usedNames: used,
       variables: TEMPLATE_VARIABLES.map((variable) => ({
         ...variable,
@@ -381,7 +487,19 @@ export default {
       annotationKey: sample.annotationKey,
       extra: this._now(),
     });
-    return renderTemplate(template || DEFAULT_TEMPLATE, vars);
+    // The notes section is rendered once per child note, so the preview
+    // needs one of its own — otherwise `{{noteCallout}}` looks like a
+    // variable nobody defines.
+    return renderTemplate(
+      template || DEFAULT_TEMPLATE,
+      noteVars(
+        vars,
+        getString(
+          "zoteroSiYuan-template-sample-note",
+          "This is what a child note looks like.",
+        ),
+      ),
+    );
   }
 
 };

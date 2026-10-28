@@ -160,3 +160,219 @@ section("Notification bubbles");
       toast.includes("if (stack.childElementCount)"),
   );
 }
+
+/* ------------- 5. an upper-case name is imported or declared ------------ */
+
+section("Undefined constants");
+{
+  // `ITEM_SECTION_DOCUMENT` was used in a branch nothing else touched until
+  // the user clicked "sync this item" — the build does not resolve names,
+  // so the first sign was a bubble that said "is not defined". Every name
+  // written in upper case has to come from an import or a declaration.
+  const GLOBALS = new Set([
+    "AI", "API", "CDATA", "CJK", "CPU", "CSS", "DOM", "DPI", "FTL", "HTTP",
+    "HTTPS", "ID", "IDS", "IP", "JSON", "JS", "LOCALE", "OK", "PDF", "PNG",
+    "SQL", "SVG", "UI", "URL", "URLS", "UTF", "UUID", "XPI", "XUL",
+    "NUMBER", "STRING", "BOOLEAN", "OBJECT", "SYMBOL", "BIGINT",
+  ]);
+  // Comments, strings, template literals (nested ones included) and regex
+  // literals are blanked out. A regular expression cannot pair a nested
+  // template (`${list.map((x) => `…`)}`), so the file is walked once,
+  // character by character.
+  const REGEX_AFTER = "=(:,[!&|?{};+-*%<>~^";
+  const codeOnly = (text) => {
+    const out = [];
+    const stack = [{ kind: "code" }];
+    let i = 0;
+    const lastMeaningful = () => {
+      for (let j = out.length - 1; j >= 0; j--) {
+        if (!/\s/.test(out[j])) {
+          return out[j];
+        }
+      }
+      return "";
+    };
+    const blank = (ch) => (ch === "\n" ? "\n" : " ");
+    while (i < text.length) {
+      const top = stack[stack.length - 1];
+      const ch = text[i];
+      if (top.kind === "string") {
+        if (ch === "\\") {
+          out.push(" ", " ");
+          i += 2;
+          continue;
+        }
+        out.push(blank(ch));
+        if (ch === top.quote) {
+          stack.pop();
+        }
+        i++;
+        continue;
+      }
+      if (top.kind === "template") {
+        if (ch === "\\") {
+          out.push(" ", " ");
+          i += 2;
+          continue;
+        }
+        if (ch === "`") {
+          stack.pop();
+          out.push(" ");
+          i++;
+          continue;
+        }
+        if (ch === "$" && text[i + 1] === "{") {
+          out.push(" ", " ");
+          stack.push({ kind: "expr", depth: 1 });
+          i += 2;
+          continue;
+        }
+        out.push(blank(ch));
+        i++;
+        continue;
+      }
+      if (ch === "/" && text[i + 1] === "/") {
+        while (i < text.length && text[i] !== "\n") {
+          out.push(" ");
+          i++;
+        }
+        continue;
+      }
+      if (ch === "/" && text[i + 1] === "*") {
+        out.push(" ", " ");
+        i += 2;
+        while (i < text.length && !(text[i] === "*" && text[i + 1] === "/")) {
+          out.push(blank(text[i]));
+          i++;
+        }
+        out.push(" ", " ");
+        i += 2;
+        continue;
+      }
+      if (ch === "'" || ch === '"') {
+        out.push(" ");
+        stack.push({ kind: "string", quote: ch });
+        i++;
+        continue;
+      }
+      if (ch === "`") {
+        out.push(" ");
+        stack.push({ kind: "template" });
+        i++;
+        continue;
+      }
+      if (ch === "/") {
+        const previous = lastMeaningful();
+        if (previous === "" || REGEX_AFTER.includes(previous)) {
+          out.push(" ");
+          i++;
+          let inClass = false;
+          while (i < text.length && text[i] !== "\n") {
+            const c = text[i];
+            if (c === "\\") {
+              out.push(" ", " ");
+              i += 2;
+              continue;
+            }
+            if (c === "[") {
+              inClass = true;
+            }
+            else if (c === "]") {
+              inClass = false;
+            }
+            else if (c === "/" && !inClass) {
+              out.push(" ");
+              i++;
+              break;
+            }
+            out.push(" ");
+            i++;
+          }
+          continue;
+        }
+      }
+      if (top.kind === "expr" && (ch === "{" || ch === "}")) {
+        if (ch === "{") {
+          top.depth++;
+        }
+        else {
+          top.depth--;
+          out.push(" ");
+          i++;
+          if (!top.depth) {
+            stack.pop();
+          }
+          continue;
+        }
+      }
+      out.push(ch);
+      i++;
+    }
+    return out.join("");
+  };
+  const NAME = /\b[A-Z][A-Z0-9_]{2,}\b/g;
+
+  const missing = [];
+  for (const file of files.filter(
+    (f) => extname(f) === ".js" && f.startsWith(SRC_DIR),
+  )) {
+    const text = codeOnly(readFileSync(file, "utf8"));
+    const defined = new Set();
+    // `import { A, B as C }` and `import D from`
+    for (const m of text.matchAll(
+      /import\s+(?:([A-Za-z_$][\w$]*)\s*,?\s*)?(?:\{([^}]*)\})?\s*from/g,
+    )) {
+      if (m[1]) defined.add(m[1]);
+      for (const part of String(m[2] || "").split(",")) {
+        const name = part.split(/\s+as\s+/).pop().trim();
+        if (name) defined.add(name);
+      }
+    }
+    // `export { A, B } from "./x.js"` re-exports a name this file uses as
+    // well — `siyuan-image.js` does exactly that with `JPEG`.
+    for (const m of text.matchAll(/export\s*\{([^}]*)\}\s*from/g)) {
+      for (const part of m[1].split(",")) {
+        const name = part.split(/\s+as\s+/)[0].trim();
+        if (name) defined.add(name);
+      }
+    }
+    // `const A =`, `const { A, B } =`, `let`/`var` too
+    for (const m of text.matchAll(/\b(?:const|let|var)\s+([A-Za-z_$][\w$]*)/g)) {
+      defined.add(m[1]);
+    }
+    for (const m of text.matchAll(/\b(?:const|let|var)\s*\{([^}]*)\}/g)) {
+      for (const part of m[1].split(",")) {
+        const name = part.split(":").pop().split("=")[0].trim();
+        if (name) defined.add(name);
+      }
+    }
+    // One file may re-export what another declares, and a class or function
+    // written in upper case is a definition too.
+    for (const m of text.matchAll(/\b(?:class|function)\s+([A-Z][\w$]*)/g)) {
+      defined.add(m[1]);
+    }
+    for (const m of text.matchAll(NAME)) {
+      const name = m[0];
+      if (GLOBALS.has(name) || defined.has(name)) {
+        continue;
+      }
+      // A property (`Style.NAME`), an object key (`{ NAME: … }`) or a
+      // comment word is not a free name.
+      const before = text.slice(Math.max(0, m.index - 2), m.index);
+      if (/[.?]$/.test(before)) {
+        continue;
+      }
+      const after = text.slice(m.index + name.length).match(/^\s*:/);
+      if (after) {
+        continue;
+      }
+      const line = text.slice(0, m.index).split("\n").length;
+      missing.push(`${relative(ROOT, file)}:${line} ${name}`);
+    }
+  }
+  check(
+    "every upper-case name is imported or declared",
+    missing.length === 0,
+    missing.slice(0, 12).join(", "),
+  );
+}

@@ -11,7 +11,14 @@
 
 import { check, readSrc, section } from "./harness.mjs";
 
-const { blockAttrs, indexModule, batchModule, itemModule, transportModule } =
+const {
+  blockAttrs,
+  indexModule,
+  batchModule,
+  itemModule,
+  sectionsModule,
+  transportModule,
+} =
   await (async () => {
     const blockAttrs = await import(
       new URL("../../src/modules/block-attrs.js", import.meta.url).href
@@ -25,10 +32,20 @@ const { blockAttrs, indexModule, batchModule, itemModule, transportModule } =
     const itemModule = await import(
       new URL("../../src/app/item-send.js", import.meta.url).href
     );
+    const sectionsModule = await import(
+      new URL("../../src/app/item-sections.js", import.meta.url).href
+    );
     const transportModule = await import(
       new URL("../../src/app/transport.js", import.meta.url).href
     );
-    return { blockAttrs, indexModule, batchModule, itemModule, transportModule };
+    return {
+      blockAttrs,
+      indexModule,
+      batchModule,
+      itemModule,
+      sectionsModule,
+      transportModule,
+    };
   })();
 
 /* ---------------------- 13a. the attribute line itself ------------------ */
@@ -441,14 +458,26 @@ section("Block attributes — batch grouping");
 
 section("Block attributes — item sync");
 {
-  const { SECTION_ATTR, SECTION_ITEM_ATTR, itemDocumentAttributes, markBlock } =
-    blockAttrs;
-  const item = itemModule.default;
+  const {
+    ITEM_KEY_ATTR,
+    LIBRARY_ID_ATTR,
+    SECTION_ATTR,
+    SECTION_ITEM_ATTR,
+    itemDocumentAttributes,
+    itemSectionAttributes,
+    markBlock,
+  } = blockAttrs;
+  const item = sectionsModule.default;
 
-  const attrs = itemDocumentAttributes("ITEM1");
+  const attrs = itemDocumentAttributes("ITEM1", 7);
   check(
     "the sync block names the item and its kind",
     attrs[SECTION_ATTR] === "item" && attrs[SECTION_ITEM_ATTR] === "ITEM1",
+    JSON.stringify(attrs),
+  );
+  check(
+    "the sync block carries the library as well as the key",
+    attrs[LIBRARY_ID_ATTR] === "7",
     JSON.stringify(attrs),
   );
   const sync = markBlock("> [!note] 文献信息\n> body", attrs);
@@ -457,11 +486,25 @@ section("Block attributes — item sync");
     "the sync is one marked super block",
     sync.startsWith("{{{row\n\n") &&
       last.includes(`${SECTION_ATTR}="item"`) &&
-      last.includes(`${SECTION_ITEM_ATTR}="ITEM1"`),
+      last.includes(`${SECTION_ITEM_ATTR}="ITEM1"`) &&
+      last.includes(`${LIBRARY_ID_ATTR}="7"`),
     last,
   );
 
-  const text = item._itemSectionMarkdown(
+  const infoAttrs = itemSectionAttributes("info", "ITEM1", 7);
+  check(
+    "an item section uses the ordinary item key, not the sync container key",
+    infoAttrs[SECTION_ATTR] === "info" &&
+      infoAttrs[ITEM_KEY_ATTR] === "ITEM1" &&
+      infoAttrs[SECTION_ITEM_ATTR] === undefined &&
+      infoAttrs[LIBRARY_ID_ATTR] === "7",
+    JSON.stringify(infoAttrs),
+  );
+
+  // The section templates read a preference; an empty one is the built-in
+  // shape, and the harness has no Zotero preferences.
+  const sections = { ...item, _itemSectionTemplate: () => "" };
+  const text = sections._itemSectionMarkdown(
     {
       itemKey: "ITEM1",
       title: "A paper",
@@ -496,7 +539,7 @@ section("Block attributes — item sync");
       };
     },
   };
-  const ids = await item._sectionBlockIDs.call(
+  const ids = await sections._sectionBlockIDs.call(
     fake,
     "20260101000000-docdocd",
     { itemKey: "ITEM1" },
@@ -508,9 +551,39 @@ section("Block attributes — item sync");
       /root_id = '20260101000000-docdocd'/.test(calls[0]),
     calls[0],
   );
+  const infoCalls = [];
+  const infoFake = {
+    async _httpClient() {
+      return {
+        async sql(statement) {
+          infoCalls.push(statement);
+          return [{ id: "20260101000000-bbbbbbb" }];
+        },
+      };
+    },
+  };
+  const infoIDs = await sections._sectionBlockIDs.call(
+    infoFake,
+    "20260101000000-docdocd",
+    infoAttrs,
+  );
+  check(
+    "an item section is found by its own section and the ordinary item key",
+    infoIDs.length === 1 &&
+      new RegExp(`${ITEM_KEY_ATTR}="ITEM1"`).test(infoCalls[0]) &&
+      new RegExp(`${SECTION_ATTR}="info"`).test(infoCalls[0]) &&
+      new RegExp(`${LIBRARY_ID_ATTR}="7"`).test(infoCalls[0]),
+    infoCalls[0],
+  );
+  check(
+    "the sync query does not match a separately sent info section",
+    new RegExp(`${SECTION_ITEM_ATTR}="ITEM1"`).test(calls[0]) &&
+      !new RegExp(`${SECTION_ATTR}="info"`).test(calls[0]),
+    calls[0],
+  );
   check(
     "a document without a key has no blocks",
-    (await item._sectionBlockIDs.call(fake, "not-an-id", { itemKey: "ITEM1" }))
+    (await sections._sectionBlockIDs.call(fake, "not-an-id", { itemKey: "ITEM1" }))
       .length === 0,
   );
 }
@@ -540,7 +613,21 @@ section("Block attributes — wiring");
   );
   check(
     "the item sync marks its block with the item key",
-    /itemDocumentAttributes\(itemKey\)/.test(readSrc("app/item-send.js")),
+    /itemDocumentAttributes\(itemKey(?:,\s*[^)]*)?\)/.test(
+      readSrc("app/item-send.js"),
+    ),
+  );
+  check(
+    "every item-level action writes its own section",
+    [
+      /section:\s*ITEM_SECTION_INFO/.test(readSrc("app/item-actions.js")),
+      /section:\s*ITEM_SECTION_ABSTRACT/.test(readSrc("app/item-actions.js")),
+      /section:\s*ITEM_SECTION_NOTES/.test(readSrc("app/item-actions.js")),
+    ].every(Boolean),
+  );
+  check(
+    "the section commands are registered on the addon",
+    /itemActions/.test(readSrc("index.js")),
   );
   check(
     "the item menu offers the sync",

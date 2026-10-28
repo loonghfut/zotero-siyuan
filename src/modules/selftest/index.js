@@ -22,7 +22,7 @@
 
 import { removePicture } from "../siyuan-image.js";
 
-import { log, pluginVersion, sleep, writeReport } from "./report.js";
+import { log, pluginVersion, SELFTEST_MARKER, sleep, writeReport } from "./report.js";
 import { findPDFAttachment, findRealAnnotation } from "./fixtures.js";
 import { testPreferencesPane } from "./pane.js";
 import { createPictureBookkeeping } from "./pictures.js";

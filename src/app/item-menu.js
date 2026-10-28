@@ -88,18 +88,63 @@ export default {
     this._removeItemMenu(win);
   },
 
-  /** The regular items that are selected in a window. */
-  _selectedRegularItems(win) {
+  /**
+   * The targets the item menu acts on.
+   *
+   * A user right-clicks the PDF row far more often than the parent paper,
+   * and an annotation row more often still. Those are child items, so the
+   * selection is walked up to the item that owns the bibliographic data.
+   * A standalone PDF has no such parent and is its own target. Selecting
+   * both a parent and one of its children still sends once.
+   */
+  _selectedSendTargets(win) {
     try {
       const pane = win && win.ZoteroPane;
       const items = (pane && pane.getSelectedItems && pane.getSelectedItems()) || [];
-      return items.filter(
-        (item) => item && item.isRegularItem && item.isRegularItem(),
-      );
+      const seen = new Set();
+      const targets = [];
+      for (const item of items) {
+        const target = this._sendTargetOf(item);
+        if (target && !seen.has(target.id)) {
+          seen.add(target.id);
+          targets.push(target);
+        }
+      }
+      return targets;
     }
     catch (e) {
       return [];
     }
+  },
+
+  /** The top-level item a selection belongs to, or a standalone PDF. */
+  _sendTargetOf(item) {
+    let current = item;
+    let fallbackPDF = null;
+    // A depth limit keeps a malformed parent chain from looping.
+    for (let step = 0; step < 4 && current; step++) {
+      try {
+        if (current.isRegularItem && current.isRegularItem()) {
+          return current;
+        }
+        if (
+          !fallbackPDF &&
+          current.isPDFAttachment &&
+          current.isPDFAttachment()
+        ) {
+          fallbackPDF = current;
+        }
+        const parentID = current.parentItemID;
+        if (!parentID) {
+          return fallbackPDF;
+        }
+        current = Zotero.Items.get(parentID);
+      }
+      catch (e) {
+        return fallbackPDF;
+      }
+    }
+    return fallbackPDF;
   },
 
   /** Build the menu once per window. */
@@ -145,9 +190,7 @@ export default {
       item.setAttribute("label", getString(labelID, fallback));
       item.addEventListener("command", (e) => {
         e.preventDefault();
-        this._runForSelection(win, method).catch((error) => {
-          Zotero.logError(`ZoteroSiYuan: ${method} failed: ${error}`);
-        });
+        this._runForSelection(win, method);
       });
       popup.appendChild(item);
     }
@@ -156,10 +199,10 @@ export default {
     // Collections, searches and other rows have no item to send. Hiding the
     // menu there is better than a command that does nothing.
     const onShowing = () => {
-      menu.hidden = !this._selectedRegularItems(win).length;
+      menu.hidden = !this._selectedSendTargets(win).length;
     };
     parent.addEventListener("popupshowing", onShowing);
-    menu.hidden = !this._selectedRegularItems(win).length;
+    menu.hidden = !this._selectedSendTargets(win).length;
 
     if (!this._itemMenus) {
       this._itemMenus = new WeakMap();
@@ -185,12 +228,21 @@ export default {
 
   /** Run one of the item actions for every selected item. */
   async _runForSelection(win, method) {
-    const items = this._selectedRegularItems(win);
+    const items = this._selectedSendTargets(win);
     if (!items.length || typeof this[method] !== "function") {
       return;
     }
     for (const item of items) {
-      await this[method](item);
+      try {
+        await this[method](item);
+      }
+      catch (error) {
+        // A failure before the write even starts — reading the notes, for
+        // instance — never reaches the send's own error bubble, so it is
+        // shown here: a command that silently did nothing looks broken.
+        Zotero.logError(`ZoteroSiYuan: ${method} failed: ${error}`);
+        this._notifyItemError(error, item);
+      }
     }
   },
 };

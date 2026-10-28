@@ -212,6 +212,59 @@ export class SiYuanCLI extends SiYuanProcess {
   }
 
   /**
+   * Replace the content of an existing block.
+   *
+   * A sync used to write the new block and delete the old one. Updating in
+   * place keeps the block id — so a link, a backlink or the plugin's own
+   * index still leads to the note — and there is no moment where two copies
+   * exist.
+   *
+   * The command does not say whether the block kept its id, so the caller
+   * checks afterwards. A failure is reported like an append's: a refused
+   * update wrote nothing, an unanswered one may have written.
+   *
+   * @param {String} blockID
+   * @param {String} markdown
+   * @returns {Promise<void>}
+   */
+
+  async updateBlock(blockID, markdown) {
+    if (!isBlockID(blockID)) {
+      throw new Error(`"${blockID}" is not a block id`);
+    }
+    const path = this.tempPath();
+    await Zotero.File.putContentsAsync(path, markdown);
+    try {
+      const result = await this.run(
+        [
+          "block",
+          "update",
+          "--id",
+          blockID,
+          "--file",
+          path,
+          "--format",
+          "json",
+        ],
+        { mutating: true },
+      );
+      if (result.code !== 0) {
+        throw new Error(
+          this.describeFailure(result.output, ["block", "update"], result.code),
+        );
+      }
+    }
+    finally {
+      try {
+        await IOUtils.remove(path, { ignoreAbsent: true });
+      }
+      catch (e) {
+        // ignore
+      }
+    }
+  }
+
+  /**
    * Today's daily note, created when it does not exist yet — and remembered.
    *
    * `dailynote create` is idempotent and answers with the id of today's

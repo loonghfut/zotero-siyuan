@@ -121,21 +121,23 @@ Object.assign(ZoteroSiYuanPreferences, {
   /* -------------------------------------------------- which template */
 
   /**
-   * Show one of the two templates in the editor.
+   * Show one of the templates in the editor.
    *
-   * "One document per item" can have a template of its own. Both are
-   * edited in the same textarea — the switch only decides which preference
-   * the editor reads and writes, so the preview, the variables and the
-   * problems keep working exactly as they do for the common one.
+   * Every template — the common one, the one for a document per item, and
+   * the three sections of a literature note — is edited in the same
+   * textarea. The switch only decides which preference the editor reads
+   * and writes, so the preview, the variables and the problems keep
+   * working exactly as they do for the common one.
    *
-   * @param {String} slot - "note" or "item"
+   * @param {String} slot - "note", "item", "info", "abstract" or "notes"
    */
   _showTemplateSlot: function (slot) {
     var addon = Zotero.ZoteroSiYuan;
     if (!addon || !addon.getTemplateHelp) {
       return;
     }
-    this._templateSlot = slot === "item" ? "item" : "note";
+    var slots = ["note", "item", "info", "abstract", "notes"];
+    this._templateSlot = slots.indexOf(slot) === -1 ? "note" : slot;
     var help = addon.getTemplateHelp(this._templateSlot);
     var area = document.getElementById(this.TEMPLATE_ID);
     if (area) {
@@ -145,15 +147,22 @@ Object.assign(ZoteroSiYuanPreferences, {
     }
     // The per-item template is empty by default, and that means "use the
     // common one" — say so instead of leaving the user with a blank box.
-    this._setStatus(
-      this._templateSlot === "item" && !help.template.trim()
-        ? this._text(
-            "zoteroSiYuan-pref-template-item-inherit",
-            "Empty — the common template will be used",
-          )
-        : "",
-      false,
-    );
+    // The section templates show their built-in shape, and the note says
+    // that it is the built-in one rather than something the user wrote.
+    var status = "";
+    if (this._templateSlot === "item" && !String(help.template).trim()) {
+      status = this._text(
+        "zoteroSiYuan-pref-template-item-inherit",
+        "Empty — the common template will be used",
+      );
+    }
+    else if (this._templateSlot !== "note" && !String(help.stored || "").trim()) {
+      status = this._text(
+        "zoteroSiYuan-pref-template-section-default",
+        "Built-in template — edit it to make it your own",
+      );
+    }
+    this._setStatus(status, false);
     this._variables = help.variables || [];
     this._renderVariables(this._filteredVariables());
     this._showProblems(help.template);
@@ -168,6 +177,10 @@ Object.assign(ZoteroSiYuanPreferences, {
       return;
     }
     var text = String(value == null ? "" : value);
+    if (addon.setTemplateForSlot) {
+      addon.setTemplateForSlot(this._templateSlot, text);
+      return;
+    }
     if (this._templateSlot === "item" && addon.setItemTemplate) {
       addon.setItemTemplate(text);
     }
@@ -188,6 +201,10 @@ Object.assign(ZoteroSiYuanPreferences, {
     var addon = Zotero.ZoteroSiYuan;
     if (!addon) {
       return "";
+    }
+    if (addon.resetTemplateForSlot && addon.getTemplateHelp) {
+      addon.resetTemplateForSlot(this._templateSlot);
+      return addon.getTemplateHelp(this._templateSlot).template;
     }
     if (this._templateSlot === "item" && addon.resetItemTemplate) {
       addon.resetItemTemplate();
@@ -256,10 +273,17 @@ Object.assign(ZoteroSiYuanPreferences, {
     this._previewToken = (this._previewToken || 0) + 1;
     var token = this._previewToken;
     // An empty per-item template means "use the common one", so the
-    // preview shows that one — a blank preview would look broken.
+    // preview shows that one — a blank preview would look broken. The
+    // section slots always show something, but the same rule applies if a
+    // box is cleared by hand.
     var text = area.value;
-    if (this._templateSlot === "item" && !String(text).trim() && addon.getTemplate) {
-      text = addon.getTemplate();
+    if (!String(text).trim()) {
+      if (this._templateSlot === "item" && addon.getTemplate) {
+        text = addon.getTemplate();
+      }
+      else if (addon.getTemplateHelp) {
+        text = addon.getTemplateHelp(this._templateSlot).defaultTemplate || "";
+      }
     }
     addon.previewTemplate(text).then(
       function (result) {

@@ -81,17 +81,18 @@ function destinationOf(entry) {
 }
 
 /**
- * The editor slot a template belongs to.
+ * The editor slots a template can belong to.
  *
- * The pane edits two templates: the common one and the one used when a
- * note becomes a document of its own. A saved template has to come back to
- * the one it was saved from; "note" is the default, so only the other one
- * is written down.
+ * The pane edits the common template, the one used when a note becomes a
+ * document of its own, and the three sections of a literature note. A saved
+ * template has to come back to the slot it was saved from; "note" is the
+ * default, so only the others are written down.
  */
-export const TEMPLATE_SLOTS = ["note", "item"];
+export const TEMPLATE_SLOTS = ["note", "item", "info", "abstract", "notes"];
 
 function slotOf(entry) {
-  return entry && entry.slot === "item" ? { slot: "item" } : {};
+  const slot = String((entry && entry.slot) || "");
+  return TEMPLATE_SLOTS.includes(slot) && slot !== "note" ? { slot } : {};
 }
 
 /**
