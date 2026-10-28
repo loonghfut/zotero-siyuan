@@ -38,13 +38,14 @@ item-menu-info = 发送条目信息
 item-menu-abstract = 发送摘要
 item-menu-notes = 发送笔记
 item-menu-annotations = 发送全部注释
-item-menu-document = 新建文献笔记文档
+item-menu-document = 同步这篇文献（信息 / 摘要 / 笔记）
 
 item-sent-title = 已发送到思源笔记
 item-failed-title = 无法把条目发送到思源笔记
 item-no-abstract = 这个条目没有摘要。
 item-no-notes = 这个条目没有笔记。
 item-no-annotations = 这个条目没有注释。
+item-no-content = 这个条目没有可以写进文档的内容。
 item-info = 文献信息
 item-abstract = 摘要
 item-notes = 笔记

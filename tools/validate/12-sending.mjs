@@ -335,7 +335,7 @@ section("The item list menu");
       "_sendItemAbstract",
       "_sendItemNotes",
       "_sendItemAnnotations",
-      "_createItemNoteDocument",
+      "_syncItemDocument",
     ].every((method) => menu.includes(`"${method}"`)),
   );
 }

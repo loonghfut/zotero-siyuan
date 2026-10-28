@@ -38,13 +38,14 @@ item-menu-info = Send the item details
 item-menu-abstract = Send the abstract
 item-menu-notes = Send the notes
 item-menu-annotations = Send all annotations
-item-menu-document = Create the literature-note document
+item-menu-document = Sync this item (details, abstract, notes)
 
 item-sent-title = Sent to SiYuan
 item-failed-title = Could not send the item to SiYuan
 item-no-abstract = This item has no abstract.
 item-no-notes = This item has no notes.
 item-no-annotations = This item has no annotations.
+item-no-content = This item has nothing to put in its document.
 item-info = Item details
 item-abstract = Abstract
 item-notes = Notes

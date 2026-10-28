@@ -135,9 +135,9 @@ export default {
         "Send all annotations",
       ],
       [
-        "_createItemNoteDocument",
+        "_syncItemDocument",
         "zoteroSiYuan-item-menu-document",
-        "Create the literature-note document",
+        "Sync this item (details, abstract, notes)",
       ],
     ];
     for (const [method, labelID, fallback] of entries) {

@@ -14,6 +14,12 @@
  */
 
 import { getString } from "../utils/locale.js";
+import {
+  ANNOTATION_KEY_ATTR,
+  annotationAttributes,
+  attributeValue,
+  insertAttributes,
+} from "../modules/block-attrs.js";
 import { siyuanBlockLink } from "../modules/metadata.js";
 import { parseAnnotationKey } from "../modules/siyuan-index.js";
 import { showToast } from "../modules/toast.js";
@@ -313,7 +319,10 @@ export default {
           built.push({
             ...job,
             vars,
-            markdown: this._withBatchAnchor(markdown, vars),
+            markdown: this._withBatchAnchor(
+              insertAttributes(markdown, annotationAttributes(vars)),
+              vars,
+            ),
           });
         }
         catch (e) {
@@ -465,10 +474,21 @@ export default {
     }
     const anchor = `[​](${link}${link.includes("?") ? "&" : "?"}zsi=batch)`;
     const lines = text.split("\n");
-    if (!lines.length || !lines[lines.length - 1].trim()) {
-      return `${text}${text ? "\n" : ""}${anchor}`;
+    let last = lines.length - 1;
+    while (last >= 0 && !lines[last].trim()) {
+      last--;
     }
-    lines[lines.length - 1] = `${lines[lines.length - 1]} ${anchor}`;
+    if (last < 0) {
+      return anchor;
+    }
+    if (/^\s*\{:/.test(lines[last])) {
+      // The last line is the block IAL. Appending the link to it would put
+      // the link inside the attribute line, and SiYuan would drop the IAL —
+      // so the anchor gets a block of its own after the note.
+      lines.splice(last + 1, 0, "", anchor);
+      return lines.join("\n");
+    }
+    lines[last] = `${lines[last]} ${anchor}`;
     return lines.join("\n");
   },
 
@@ -476,10 +496,12 @@ export default {
    * Group the blocks of one write by the annotation they belong to.
    *
    * The rows come back in document order (`sort`), which is the order the
-   * notes were written in. An anchor closes its own note, so every block
-   * after the previous anchor and up to this one belongs to this note.
+   * notes were written in. Every note's **first** block carries the
+   * annotation key as an attribute, so that is the primary map — it works
+   * even when the template never wrote a Zotero link. The `zsi=batch` anchor
+   * is the fallback for a write made before the attributes existed.
    *
-   * @param {Object[]} blockRows - rows with id and markdown
+   * @param {Object[]} blockRows - rows with id, markdown and ial
    * @param {Object[]} jobs - the notes, in write order
    * @returns {{groups: String[][], mapped: Boolean}}
    */
@@ -492,6 +514,26 @@ export default {
         byKey.set(job.key, index);
       }
     });
+    // The first block of a note says which note it starts. This does not
+    // need the invisible anchor at all — which matters when the template
+    // never wrote a link and `_withBatchAnchor` had nothing to attach to.
+    if (rows.some((row) => attributeValue(row.ial, ANNOTATION_KEY_ATTR))) {
+      const byAttribute = jobs.map(() => []);
+      let current = -1;
+      for (const row of rows) {
+        const key = attributeValue(row.ial, ANNOTATION_KEY_ATTR) ||
+          parseAnnotationKey(row.markdown);
+        if (key && byKey.has(key)) {
+          current = byKey.get(key);
+        }
+        if (current >= 0 && byAttribute[current]) {
+          byAttribute[current].push(row.id);
+        }
+      }
+      if (byAttribute.every((group) => group.length > 0)) {
+        return { groups: byAttribute, mapped: true };
+      }
+    }
     const anchors = new Set();
     for (const row of rows) {
       if (row && String(row.markdown || "").includes("zsi=batch")) {

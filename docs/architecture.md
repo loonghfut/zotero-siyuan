@@ -65,7 +65,7 @@ Object.assign(
 **不做的两件事**都是有意的：
 
 - **不 spawn `siyuan --version`**。解析 CLI 要跑一个进程，而第一次发送或第一次"测试连接"时才真正需要它。
-- **不扫库建索引**。全量扫描是 `markdown LIKE '%zotero://…%'`，前置 `%` 用不上索引；
+- **不扫库建索引**。全量扫描是 `markdown LIKE '%zotero://…%' OR ial LIKE '%custom-zotero-annotation-key=%'`，前置 `%` 用不上索引；
   改成按 PDF 增量（见第 5 节）。
 
 启动代价因此接近零：注册两个事件 + 一个 2 秒轮询的定时器。
@@ -243,10 +243,16 @@ appendPicture(text, image)    图片 Markdown 插到正文        ← _buildCont
 | `_sendItemAbstract` | `abstractMarkdown(vars)` |
 | `_sendItemNotes` | 子笔记 HTML → Markdown（`noteHtmlToMarkdown`） |
 | `_sendItemAnnotations` | 汇总各 PDF 的注释 key，交给 `_sendMany`（和阅读器批量同一条路） |
-| `_createItemNoteDocument` | 固定走 `_resolveItemDocument`，把信息/摘要/笔记写进这篇文献的文档 |
+| `_syncItemDocument` | 固定走 `_resolveItemDocument`，把信息/摘要/笔记写进这篇文献的文档，并替换上一次同步写的那三段 |
 
 `_sendItemMarkdown` 按 `destination` 决定写哪里：`item`（或 `itemDocument: true`）用
 `_resolveItemDocument`，`document` 不需要笔记本，其余用 `_resolveDestination`。
+
+`_syncItemDocument` 的三段各自带 `custom-zsi-section`（`info` / `abstract` / `notes`）
+和 `custom-zsi-item-key`。同步时先用这两个属性查出旧块，**新块写成功之后**再删旧块；
+只删带这两个属性的块，所以用户自己加的内容和注释笔记（带 `custom-zotero-*`）不受影响。
+旧段落靠思源里的属性找回，不依赖 Zotero 状态，换机器也能继续替换。
+
 条目级写入不经过 `_sendAnnotation`，所以不参与"已发送"检查、不建立注释索引——
 它送的是整条文献，不是某条注释。
 
@@ -296,12 +302,28 @@ appendPicture(text, image)    图片 Markdown 插到正文        ← _buildCont
 群组库是**另一条路径**：同样的 key 在群组里是另一个条目，写成个人库那条路径时 Zotero 不会
 报错，它只是在自己的库里找不到、链接什么都不做。所以 `libraryPath(libraryID)` 决定用哪条。
 
-插件反着读回来：`SELECT id, markdown FROM blocks WHERE markdown LIKE '%zotero://open/%/items/%'`，
-用 `annotation=` 后面的 key 建 `Map<注释 key, 块 id>`。`LIKE` 不能只认个人库的前缀——
-那样群组库发出来的笔记对索引而言等于不存在，重启后标记就没了。
+正文之外，每条笔记的**第一个块**还带着注释自己的属性（`block-attrs.js`）：
+
+```
+custom-zotero-annotation-key / item-key / attachment-key / color / page / tags / modified
+```
+
+属性以块 IAL（`{: custom-x="y"}`）的形式写在**同一次 `block append`** 里，所以不多起进程。
+它也把索引从模板里解放出来：模板完全不写 `{{zoteroAnnotationLink}}`，扫描仍然找得到这条笔记。
+索引同时认两条线索：
+
+```sql
+SELECT id, markdown, type, root_id, ial FROM blocks
+WHERE markdown LIKE '%zotero://open/%/items/%'
+   OR ial LIKE '%custom-zotero-annotation-key=%'
+```
+
+`LIKE` 不能只认个人库的前缀——那样群组库发出来的笔记对索引而言等于不存在，重启后标记就没了。
 
 - **不写进 Zotero 库**：标签会出现在标签选择器里、同步到服务器、共享库的其他人也看得见，
   而且它终究不是链接。
+- **属性也属于“思源是唯一真相”**：换模板、换机器、重扫工作空间，属性都还在。
+  值里的双引号/反斜杠会被换成空格 —— 思源在 IAL 里不把反斜杠当转义，一个引号会截断整行。
 - **按 PDF 增量**：`_ensureAttachmentIndexed` 只查这一个附件；侧栏渲染时后台跑，答完就补 ↗。
 - **防覆盖**：每添加一条就记一个 revision；扫描开始时的 revision 之前/之后的写入不会被
   旧查询结果冲掉（`refresh` / `refreshForAttachment` 里的 `_revisions`）。
@@ -469,34 +491,40 @@ Zotero 把 `scripts` 数组里的文件**按顺序加载进同一个面板作用
 9. **一次发送最多 spawn 一个进程**（`block append`），批量发送**合并成一次 `block append`**
    （外加分组时最多一次 `sql`）。任何"顺手查一下"的 CLI 调用都要先想清楚它是不是每次发送
    都必要——一次 0.6 秒，批量不再乘上去，但单条发送仍然会被它拖慢。
-10. **侧栏每次渲染 header 的代码不能做全文档查询**。一个 PDF 几百条注释，一次渲染就是
+10. **块属性写在同一批 Markdown 里**（`block-attrs.js` → IAL）。不要为每条注释再调一次
+    `attr set`：那会多一个进程。IAL 值里不能留双引号/反斜杠（思源不把反斜杠当转义），
+    批量锚点也不能追加到 IAL 行上（会截断属性）——`_withBatchAnchor` 已经把锚点放到下一块。
+11. **凡是读 `blocks` 行给发送用的查询，都要 SELECT `ial`**。批量分组用第一个块的属性，
+    「替换上次」用属性判断这条笔记在哪儿结束；少了这一列，前者退化成锚点，后者可能把
+    同一秒写入的整批当成一条。
+12. **侧栏每次渲染 header 的代码不能做全文档查询**。一个 PDF 几百条注释，一次渲染就是
     几百次查询；手动标记走 `_manualLinksOf` 的 `WeakMap`，不要退回 `querySelectorAll`。
-11. **异步调用必须 `await`**。`IOUtils.exists()` / `Zotero.Items.getAsync()` 这类返回的是
+13. **异步调用必须 `await`**。`IOUtils.exists()` / `Zotero.Items.getAsync()` 这类返回的是
     promise，而 promise 恒为真——`if (IOUtils.exists(x))` 什么都检查不到。`npm run check`
     里有一条 `Async calls are awaited` 专门扫这个（注释和字符串会先被剥掉）。
-12. **模板变量不能是"永远是空"的**。`{{annotatorDate}}` 曾经如此：Zotero 给阅读器的注释
+14. **模板变量不能是"永远是空"的**。`{{annotatorDate}}` 曾经如此：Zotero 给阅读器的注释
     JSON 里**没有日期**，而这个变量正是从那里取的。现在它从条目取，且只在模板真的用到时
     才查一次条目（`_templateUses`，按模板字符串缓存）。
-13. **索引扫描一次会话只跑一次**（`ensureScanned` + `INDEX_TTL_MS`）。`LIKE '%…%'` 本来
+15. **索引扫描一次会话只跑一次**（`ensureScanned` + `INDEX_TTL_MS`）。`LIKE '%…%'` 本来
     就要读整张表，按 PDF 分片省不下扫描量，只是把同样的活儿做了 N 遍——实测（1341 行的
     表）整表查询 4–6 ms、单个 PDF 3–5 ms，而两者各要 spawn 一次进程。并发的侧栏必须等
     同一个 Promise（`_scanning`），否则恢复八个标签页就是八次全表查询。
-14. **发送期间所有按钮都置灰**（`_setReaderBusy`），而且在发送中途渲染出来的 header 也要
+16. **发送期间所有按钮都置灰**（`_setReaderBusy`），而且在发送中途渲染出来的 header 也要
     一出生就是 disabled（`_busyDocs`）。只禁用被点的那一个，等于允许"再点一下"写第二条。
-15. **气泡画在调用方给的文档里**（`showToast({ doc })`）。跨窗口投递在阅读器占满窗口时
+17. **气泡画在调用方给的文档里**（`showToast({ doc })`）。跨窗口投递在阅读器占满窗口时
     等于没显示；每个文档一个 stack（`WeakMap`），不要退回到"全局一个容器"。
-16. **索引属于一个 workspace**（`ensureScanned({ key })`）。“这条注释发过”这个映射只存在
+18. **索引属于一个 workspace**（`ensureScanned({ key })`）。“这条注释发过”这个映射只存在
     于某个 workspace 里，换 workspace 之后旧索引里的标记全是死链，所以 key 变了就先清空。
-17. **"这个 PDF 索引过了"只在一定时间内成立**（`_indexedAttachments` + `INDEX_TTL_MS`）。
+19. **"这个 PDF 索引过了"只在一定时间内成立**（`_indexedAttachments` + `INDEX_TTL_MS`）。
     原来记一次就永远跳过，于是思源里新增/删除/同步进来的笔记永远不会反映到侧栏。
-18. **索引也能走 HTTP**（`_indexTransport` + `POST /api/query/sql`）。CLI 起不来但内核能
+20. **索引也能走 HTTP**（`_indexTransport` + `POST /api/query/sql`）。CLI 起不来但内核能
     连上时，发送是好的，可重启后所有标记消失——只因为扫描只会用 CLI。
-19. **自动发送默认关闭，且过滤器是"与"关系**。任何一个维度留空 = 不限，别把空列表
+21. **自动发送默认关闭，且过滤器是"与"关系**。任何一个维度留空 = 不限，别把空列表
     解释成"什么都不发"；也别把 `autoSend` 的默认值改成 `"1"`。
-20. **监听器和菜单必须成对拆掉**。Notifier observer、`_autoSendTimers`、`_queueTimer`、
+22. **监听器和菜单必须成对拆掉**。Notifier observer、`_autoSendTimers`、`_queueTimer`、
     条目菜单、`sentCache` 的定时写入，都在 `onShutdown` / `onMainWindowUnload` 里收尾；
     `_shutDown` 之后启动的回调要自己返回。
-21. **连不上 ≠ 被删除**。`_blockExists` 的三态（true / false / null）不能在调用方压成
+23. **连不上 ≠ 被删除**。`_blockExists` 的三态（true / false / null）不能在调用方压成
     布尔值，否则思源关着时点一次 ↗ 就会把标记全擦掉。
 
 ---
@@ -511,8 +539,9 @@ Zotero 把 `scripts` 数组里的文件**按顺序加载进同一个面板作用
   被重载后由**旧实例**插入的标记要靠那次扫描找回来——扫描用 `isConnected` 兜底，找不到
   就当它已经被 reader 擦掉了。
 - 批量发送**合并成一次写入**：12 条注释是一个 `block append`，不再串行等 12 个进程。
-  代价是它们落在同一秒里，重启后"这次写入的块"无法再用创建时间区分，只能靠每篇末尾那个
-  不可见锚点（`zsi=batch`）从后往前切分；锚点丢失时只有第一条能确定归属，其余的不进索引
+  代价是它们落在同一秒里，重启后"这次写入的块"不能只靠创建时间区分。现在每篇的
+  **第一个块**带注释 key（属性），分组和「替换上次」优先按它切分；`zsi=batch` 锚点
+  是升级前老笔记的退路。属性丢失且锚点也丢失时，只有第一条能确定归属，其余的不进索引
   （宁可让用户再发一次，也不要把标记打到别人的笔记上）。
 - 压缩后的图片在内存里留一份（最多 12 张 / 32 MB），所以"同一张图再发一次"不必重新
   解码 + 重编码。代价是插件退出前占着这些内存（`forgetPictures()` 在 `onShutdown` 里清）。

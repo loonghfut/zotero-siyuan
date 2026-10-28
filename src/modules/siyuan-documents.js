@@ -151,7 +151,7 @@ export default {
     const list = ids.map((id) => `'${id}'`).join(", ");
     const rows = await this.runJSON([
       "sql",
-      `SELECT id, markdown, type, root_id FROM blocks WHERE id IN (${list})`,
+      `SELECT id, markdown, type, root_id, ial FROM blocks WHERE id IN (${list})`,
     ]);
     return Array.isArray(rows) ? rows : [];
   },
@@ -177,7 +177,7 @@ export default {
         `(SELECT created FROM blocks WHERE id = '${id}')`;
     const rows = await this.runJSON([
       "sql",
-      "SELECT id, markdown, type, root_id FROM blocks " +
+      "SELECT id, markdown, type, root_id, ial FROM blocks " +
         `WHERE ${where} ORDER BY sort ASC`,
     ]);
     return Array.isArray(rows) ? rows : [];
@@ -201,7 +201,7 @@ export default {
     }
     const rows = await this.runJSON([
       "sql",
-      "SELECT id, markdown, type, created, root_id FROM blocks " +
+      "SELECT id, markdown, type, created, root_id, ial FROM blocks " +
         `WHERE root_id = '${root}' AND parent_id = '${root}' ` +
         `AND created >= '${since}' ORDER BY sort ASC`,
     ]);

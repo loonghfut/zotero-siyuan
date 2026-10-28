@@ -9,6 +9,7 @@
  */
 
 import { getString } from "../utils/locale.js";
+import { withSection } from "../modules/block-attrs.js";
 import {
   collectMetadata,
   siyuanBlockLink,
@@ -19,6 +20,7 @@ import {
   noteHtmlToMarkdown,
   notesMarkdown,
 } from "../modules/item-note.js";
+import { isBlockID } from "../modules/siyuan.js";
 import { showToast } from "../modules/toast.js";
 
 export default {
@@ -297,24 +299,143 @@ export default {
   },
 
   /**
-   * Create the item's literature-note document and put its information in.
+   * The three sections of a literature-note document.
    *
-   * The document is reused when it already exists — the annotations of the
-   * item go there as well, and a second document for the same paper would
-   * split them.
+   * Each child note is its own callout, so `withSection` marks exactly one
+   * block per section. The attributes are what a later sync uses to find and
+   * replace those blocks — without touching the user's own text or the
+   * annotation notes.
+   *
+   * @param {Object} vars
+   * @param {String[]} notes - Markdown of each child note
+   * @returns {String}
+   */
+  _itemSectionMarkdown(vars, notes = []) {
+    const itemKey = String(vars.itemKey || vars.attachmentKey || "");
+    const sections = [];
+    const info = itemInfoMarkdown(vars);
+    if (info) {
+      sections.push(withSection(info, "info", itemKey));
+    }
+    const abstract = abstractMarkdown(vars);
+    if (abstract) {
+      sections.push(withSection(abstract, "abstract", itemKey));
+    }
+    for (const note of Array.isArray(notes) ? notes : []) {
+      const text = notesMarkdown(vars, [note]);
+      if (text) {
+        sections.push(withSection(text, "notes", itemKey));
+      }
+    }
+    return sections.join("\n\n");
+  },
+
+  /**
+   * The blocks a previous sync left in the item's document.
+   *
+   * The section attributes are the whole record: nothing is kept in Zotero,
+   * so a sync after a restart — or on another machine — finds the same
+   * blocks. The item key scopes the query: a document that accidentally
+   * holds two papers' sections does not lose the other one's.
+   *
+   * @param {String} documentID
+   * @param {Object} vars
+   * @returns {Promise<String[]>}
+   */
+  async _sectionBlockIDs(documentID, vars) {
+    if (!isBlockID(documentID)) {
+      return [];
+    }
+    const itemKey = String(vars.itemKey || vars.attachmentKey || "")
+      .replace(/[^A-Za-z0-9]/g, "");
+    if (!itemKey) {
+      return [];
+    }
+    const statement =
+      "SELECT id FROM blocks " +
+      `WHERE root_id = '${documentID}' AND type != 'd' ` +
+      "AND ial LIKE '%custom-zsi-section=%' " +
+      `AND ial LIKE '%custom-zsi-item-key="${itemKey}"%' ` +
+      "ORDER BY sort ASC";
+    try {
+      const http = await this._httpClient();
+      const rows = await http.sql(statement);
+      return (rows || []).map((row) => row && row.id).filter(Boolean);
+    }
+    catch (e) {
+      Zotero.debug(
+        `ZoteroSiYuan: could not list the item document's sections over HTTP (${e.message}); trying the CLI`,
+      );
+    }
+    try {
+      const rows = await this.getCLI().runJSON(["sql", statement]);
+      return (rows || []).map((row) => row && row.id).filter(Boolean);
+    }
+    catch (e) {
+      Zotero.debug(
+        `ZoteroSiYuan: could not list the item document's sections: ${e.message}`,
+      );
+      return [];
+    }
+  },
+
+  /**
+   * Write the item's literature-note document, replacing a previous sync.
+   *
+   * The document is reused, and the information / abstract / notes blocks
+   * are replaced instead of appended. The new sections go in **first**: a
+   * failed write must not leave the document with no details at all. Only
+   * blocks carrying both section markers are deleted, so the user's own
+   * text and the annotation notes stay where they are.
+   *
+   * @param {Object} item
+   * @returns {Promise<Object|null>}
    */
   async _createItemNoteDocument(item) {
     const pdfs = await this._pdfAttachments(item);
     const vars = await this._itemVars(item, pdfs[0] || null);
-    const sections = [
-      itemInfoMarkdown(vars),
-      abstractMarkdown(vars),
-      notesMarkdown(vars, await this._itemNotes(item)),
-    ];
-    const text = sections.filter(Boolean).join("\n\n");
-    return await this._sendItemMarkdown(item, text, {
+    const notes = await this._itemNotes(item);
+    const text = this._itemSectionMarkdown(vars, notes);
+    if (!text) {
+      this._notifyItemError(
+        new Error(
+          getString(
+            "zoteroSiYuan-item-no-content",
+            "This item has nothing to put in its document.",
+          ),
+        ),
+      );
+      return null;
+    }
+    // The document has to be known before the write: its old sections are
+    // read first, and they are only removed once the new ones are in.
+    const notebook = await this._resolveNotebook();
+    const destination = await this._resolveItemDocument(notebook, vars);
+    const previous = await this._sectionBlockIDs(destination.documentID, vars);
+    const written = await this._sendItemMarkdown(item, text, {
       itemDocument: true,
       vars,
     });
+    if (written && previous.length) {
+      const deleted = await this._deleteBlocks(previous);
+      if (!deleted) {
+        Zotero.logError(
+          "ZoteroSiYuan: the old sections of the item document could not be " +
+            "deleted — the next sync will still find them by their attributes.",
+        );
+      }
+    }
+    return written;
+  },
+
+  /**
+   * The item menu's "sync this item": information, abstract and notes, in
+   * the item's own document, replacing the sections the last sync wrote.
+   *
+   * @param {Object} item
+   * @returns {Promise<Object|null>}
+   */
+  async _syncItemDocument(item) {
+    return await this._createItemNoteDocument(item);
   },
 };

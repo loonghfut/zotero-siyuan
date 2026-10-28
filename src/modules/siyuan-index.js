@@ -7,15 +7,22 @@
  * it would still not be a link.
  *
  * Instead **SiYuan is the only place the mapping exists**. Every block the
- * plugin writes carries a Zotero deep link in its metadata, so the mapping
- * can be read back out of the workspace itself:
+ * plugin writes carries a Zotero deep link in its Markdown **and** the
+ * annotation's key as a block attribute, so the mapping can be read back out
+ * of the workspace itself:
  *
- *   SELECT id, content FROM blocks WHERE content LIKE '%zotero://open/…%'
+ *   SELECT id, markdown, ial FROM blocks
+ *   WHERE markdown LIKE '%zotero://open/…%'
+ *      OR ial LIKE '%custom-zotero-annotation-key=%'
  *
- * The plugin scans that once at startup and keeps the result in memory.
- * Sending an annotation adds to the index right away, so the marker shows
- * up immediately.
+ * The attribute is what makes the index independent of the template: a
+ * template that never writes `{{zoteroAnnotationLink}}` still produces a
+ * block the next scan can find. The plugin scans once per session and keeps
+ * the result in memory. Sending an annotation adds to the index right away,
+ * so the marker shows up immediately.
  */
+
+import { annotationAttributesFromIAL } from "./block-attrs.js";
 
 /** The deep link the plugin writes into the SiYuan block. */
 export const ZOTERO_LINK_PREFIX = "zotero://open/library/items/";
@@ -409,22 +416,28 @@ export class SiYuanIndex {
 		// Everything that is added from now on is newer than the query
 		// below can be, so it has to survive it.
 		const revision = this._revision;
+		const wanted = String(attachmentKey);
 		const rows = await cli.runJSON([
 			"sql",
-			"SELECT id, markdown, type, root_id FROM blocks " +
+			"SELECT id, markdown, type, root_id, ial FROM blocks " +
 				// The key alone: the link of a group library has a different
 				// prefix, and narrowing on the personal one hid those notes.
-				`WHERE markdown LIKE '%${attachmentKey}%' ` +
+				// The attribute is the second way in: a template without a
+				// link still leaves a block the index can find.
+				`WHERE (markdown LIKE '%${wanted}%' ` +
+				`OR ial LIKE '%custom-zotero-attachment-key="${wanted}"%') ` +
 				"ORDER BY created DESC, CASE WHEN type = 'p' THEN 1 ELSE 0 END ASC",
 		]);
 		let found = 0;
 		const seen = new Set();
 		for (const row of rows || []) {
-			// `markdown` may mention the key in the note's own text.
-			if (parseAttachmentKey(row.markdown) !== String(attachmentKey)) {
+			const attrs = annotationAttributesFromIAL(row.ial);
+			// `markdown` may mention the key in the note's own text, and a
+			// block without a link only names it in its attributes.
+			if ((parseAttachmentKey(row.markdown) || attrs.attachmentKey) !== wanted) {
 				continue;
 			}
-			const key = parseAnnotationKey(row.markdown);
+			const key = parseAnnotationKey(row.markdown) || attrs.annotationKey;
 			if (!key || seen.has(key)) {
 				continue;
 			}
@@ -475,8 +488,13 @@ export class SiYuanIndex {
 			// The link lives in the *markdown* column: the plain-text
 			// `content` column has it stripped, and SiYuan rewrites a
 			// non-http link into <span data-href="…">.
-			"SELECT id, markdown, type, root_id FROM blocks " +
+			//
+			// The block attributes are the second way in. They are written
+			// even by a template that never mentions the link, so a note's
+			// history survives a template change.
+			"SELECT id, markdown, type, root_id, ial FROM blocks " +
 				`WHERE markdown LIKE ${ZOTERO_LINK_LIKE} ` +
+				"OR ial LIKE '%custom-zotero-annotation-key=%' " +
 				// Newest first, so a re-sent annotation points at its latest
 				// block; and a callout before the paragraph inside it, so
 				// the link lands on the whole quote.
@@ -488,7 +506,8 @@ export class SiYuanIndex {
 		const foundDetails = new Map();
 		const perAttachment = new Map();
 		for (const row of rows || []) {
-			const key = parseAnnotationKey(row.markdown);
+			const attrs = annotationAttributesFromIAL(row.ial);
+			const key = parseAnnotationKey(row.markdown) || attrs.annotationKey;
 			if (key && !found.has(key)) {
 				found.set(key, row.id);
 				foundDetails.set(key, {
@@ -499,7 +518,8 @@ export class SiYuanIndex {
 				});
 				// Counted once per annotation: a note is usually more than
 				// one block, and a PDF with twenty notes is not forty.
-				const attachment = parseAttachmentKey(row.markdown);
+				const attachment = parseAttachmentKey(row.markdown) ||
+					attrs.attachmentKey;
 				if (attachment) {
 					perAttachment.set(
 						attachment,

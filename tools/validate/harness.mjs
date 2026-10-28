@@ -117,5 +117,9 @@ export function report() {
   console.log(
     `\n${failures ? "FAILED" : "PASSED"}: ${checks - failures}/${checks} checks passed`,
   );
-  process.exit(failures ? 1 : 0);
+  // Setting the code lets Node close the handles the checks opened (the
+  // kernel probe's HTTP connection) before it exits. `process.exit()` here
+  // made Windows Node abort on a closing handle, so a run that had passed
+  // every check still ended with a non-zero status.
+  process.exitCode = failures ? 1 : 0;
 }

@@ -3,6 +3,10 @@
  */
 
 import { getPref } from "../utils/prefs.js";
+import {
+  ANNOTATION_KEY_ATTR,
+  attributeValue,
+} from "../modules/block-attrs.js";
 import { NOTEBOOK_CACHE_MS, WORKSPACE_CACHE_MS } from "./constants.js";
 import { SiYuanHTTP } from "../modules/siyuan-http.js";
 import {
@@ -270,7 +274,7 @@ export default {
     }
     try {
       const rows = await http.sql(
-        "SELECT id, markdown, type, root_id FROM blocks " +
+        "SELECT id, markdown, type, root_id, ial FROM blocks " +
           `WHERE root_id = '${documentID}' AND parent_id = '${documentID}' ` +
           (since ? `AND created >= '${since}' ` : "") +
           "ORDER BY sort ASC",
@@ -408,10 +412,14 @@ export default {
         entry.documentID,
       );
       if (rows.length) {
-        // A batch writes every note in the same second, so "the blocks of
-        // this second" is the whole batch. The note's own anchor says where
-        // it begins: walk back to the previous anchor.
-        if (String(entry.markdown || "").includes("zsi=batch")) {
+        // A batch writes every note in the same second. The index now points
+        // at the note's *first* block (the one that carries the attributes),
+        // not at the anchor at its end — so the batch has to be recognised
+        // from the rows, not only from the entry's own Markdown.
+        const isBatch = rows.some((row) =>
+          String((row && row.markdown) || "").includes("zsi=batch")
+        ) || String(entry.markdown || "").includes("zsi=batch");
+        if (isBatch) {
           return this._rowsOfOneBatchNote(rows, entry.blockID);
         }
         return rows;
@@ -429,27 +437,54 @@ export default {
    * The blocks of one note in a batch, from all the blocks of that second.
    *
    * A batch writes all of its notes in one append, so they share a creation
-   * second. The anchor that closes a note also marks the end of its
-   * neighbour: the blocks from after the previous anchor up to this note's
-   * anchor are exactly this note.
+   * second. Two ways to tell where a note ends:
+   *
+   * - the note's first block carries the annotation attribute, and the next
+   *   note's first block starts the next note;
+   * - a note written before the attributes existed ends at its invisible
+   *   anchor, which also marks the end of its neighbour.
+   *
+   * The attribute path is tried first because the index points at the first
+   * block now — walking back to the previous anchor from there would leave
+   * out every block after the first one.
    *
    * @param {Object[]} rows - the blocks of the write, in `sort` order
-   * @param {String} blockID - the anchor block of this note
+   * @param {String} blockID - the first block of this note, or its anchor
    * @returns {Object[]}
    */
   _rowsOfOneBatchNote(rows, blockID) {
-    const at = (rows || []).findIndex((row) => row && row.id === blockID);
+    const list = rows || [];
+    const at = list.findIndex((row) => row && row.id === blockID);
     if (at === -1) {
-      return (rows || []).slice();
+      return list.slice();
+    }
+    // The index's block is the note's first block when it carries the
+    // annotation attribute. The note ends at its own anchor — or, if that
+    // anchor was lost, where the next note's first block begins. Stopping at
+    // the anchor also keeps the slice right when the *next* note's first
+    // block has no attribute for some reason.
+    if (attributeValue(list[at].ial, ANNOTATION_KEY_ATTR)) {
+      let end = list.length;
+      for (let i = at + 1; i < list.length; i++) {
+        if (attributeValue(list[i].ial, ANNOTATION_KEY_ATTR)) {
+          end = i;
+          break;
+        }
+        if (String((list[i] && list[i].markdown) || "").includes("zsi=batch")) {
+          end = i + 1;
+          break;
+        }
+      }
+      return list.slice(at, end);
     }
     let start = 0;
     for (let i = at - 1; i >= 0; i--) {
-      if (String((rows[i] && rows[i].markdown) || "").includes("zsi=batch")) {
+      if (String((list[i] && list[i].markdown) || "").includes("zsi=batch")) {
         start = i + 1;
         break;
       }
     }
-    return rows.slice(start, at + 1);
+    return list.slice(start, at + 1);
   },
 
   /**

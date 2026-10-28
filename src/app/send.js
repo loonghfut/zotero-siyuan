@@ -4,6 +4,10 @@
 
 import { getString } from "../utils/locale.js";
 import { getPref } from "../utils/prefs.js";
+import {
+  annotationAttributes,
+  insertAttributes,
+} from "../modules/block-attrs.js";
 import { siyuanBlockLink } from "../modules/metadata.js";
 import {
   pictureAssetNames,
@@ -386,6 +390,10 @@ export default {
         vars,
         template,
       });
+      // The attributes go in the same write as the note: `block append`
+      // keeps a block IAL, so the index does not have to depend on the
+      // template having written a Zotero link.
+      markdown = insertAttributes(markdown, annotationAttributes(vars));
     }
     catch (e) {
       // The picture goes into the workspace while the content is built, so

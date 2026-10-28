@@ -354,6 +354,12 @@ export function collectMetadata({
 		annotationType: annotation.type || "",
 		annotationId: annotationKey || annotation.id || "",
 		annotationTags: tagNames(annotation.tags).join(", "),
+		// The values below are not template variables; they are what the
+		// block attributes are written from. Keeping them here means the
+		// reader's model and a Zotero item (automatic sends, retries) both
+		// answer the same way.
+		annotationColor: String(annotation.color || ""),
+		annotationModified: String(annotation.dateModified || annotationDate || ""),
 
 		// --- the picture ----------------------------------------------
 		image: picture,

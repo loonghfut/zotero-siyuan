@@ -256,12 +256,14 @@
 之前用 tag（`siyuan:<块ID>`）记过，但那样会污染标签栏、跟着 Zotero 服务器同步、
 共享库里的别人也能看见，而且它本身并不是一个链接。
 
-现在的做法是**让思源做唯一真相**：插件写的每个块，元信息里都带着那条 Zotero 深链，
-所以"这条注释发到了哪个块"可以直接从工作空间里读回来：
+现在的做法是**让思源做唯一真相**：插件写的每个块，正文里带着那条 Zotero 深链，
+块的**自定义属性**里还带着注释 key、条目 key、颜色、页码等字段。所以
+"这条注释发到了哪个块"可以直接从工作空间里读回来：
 
 ```sql
-SELECT id, markdown, type FROM blocks
-WHERE markdown LIKE '%zotero://open/library/items/%'
+SELECT id, markdown, type, ial FROM blocks
+WHERE markdown LIKE '%zotero://open/%/items/%'
+   OR ial LIKE '%custom-zotero-annotation-key=%'
 ```
 
 **按 PDF 增量建索引**：某个 PDF 的侧边栏第一次出现时，只扫这个附件对应的块，把
@@ -278,10 +280,42 @@ WHERE markdown LIKE '%zotero://open/library/items/%'
 - 同一条注释发多次，索引指向**最后一次**的块
 - 设置面板里有「重新扫描已发送的注释」按钮，随时可以重建
 
-> 索引认的是**块的 Markdown**，不是纯文本内容：思源会把 `[文字](zotero://…)` 改写成
-> `<span data-href="zotero://…">`，而纯文本那一列里已经没有链接了。
-> 也因此，模板里如果完全不写 `{{zoteroAnnotationLink}}`，历史记录就扫不到
-> （刚发的那条仍然可以跳，因为它是增量加入索引的）。
+> 索引认**两条线索**：
+>
+> - **块的 Markdown** 里的 Zotero 深链。思源会把 `[文字](zotero://…)` 改写成
+>   `<span data-href="zotero://…">`，所以要看 `markdown` 列，而不是纯文本的 `content` 列；
+> - **块的自定义属性**。它和模板无关：模板里完全不写 `{{zoteroAnnotationLink}}`，
+>   历史记录照样能扫回来。
+>
+> 属性写在**同一次 `block append`** 里（思源的 Markdown 解析器保留块 IAL），
+> 所以不会多起一个进程。属性挂在每条笔记的**第一个块**上 —— 也就是索引和
+> 「在思源中打开」指向的那个块。
+
+### 每条注释的块属性
+
+| 属性 | 含义 |
+|---|---|
+| `custom-zotero-annotation-key` | 这条注释的 key（索引的主键） |
+| `custom-zotero-item-key` | 文献条目的 key |
+| `custom-zotero-attachment-key` | PDF 附件的 key |
+| `custom-zotero-color` | 颜色，如 `#ffd400` |
+| `custom-zotero-page` | 页码（数字） |
+| `custom-zotero-tags` | 注释自己的标签，逗号分隔 |
+| `custom-zotero-modified` | 注释在 Zotero 里最后修改的时间 |
+
+在思源里可以直接按这些属性查询、过滤，或者建属性视图：
+
+```sql
+SELECT root_id, ial FROM blocks
+WHERE ial LIKE '%custom-zotero-color="#ffd400"%'
+```
+
+> 属性值里的双引号和反斜杠会被换成空格：思源在 IAL 里不把反斜杠当转义，
+> 一个引号会提前结束属性、把后面的内容整段吞掉。注释 key、页码、颜色都不受影响。
+
+> 批量发送时，每条笔记的**第一个块**同样带属性，所以分组不再只依赖末尾那条
+> 不可见的 `zsi=batch` 锚点；重启后「替换上次」也能从第一个块找到这条笔记的结尾，
+> 不会把同一秒写入的整批删掉。老笔记没有属性，仍然走锚点那条路。
 
 ### 思源没开的时候
 
@@ -453,11 +487,24 @@ export const SIYUAN_ICON_SHAPES = [
 | **发送摘要** | 摘要正文（没有摘要会直接告诉你） |
 | **发送笔记** | 这条文献下面的所有子笔记，HTML 转成 Markdown |
 | **发送全部注释** | 这篇文献所有 PDF 上的注释，走的是**批量发送**：每条仍然有自己的块和 ↗ 标记 |
-| **新建文献笔记文档** | 为这篇文献建一篇文档（已存在就复用），把条目信息、摘要、笔记一起写进去 |
+| **同步这篇文献** | 为这篇文献建一篇文档（已存在就复用），把条目信息、摘要、笔记写进去；再次同步会**替换**上一次写的这三段，不会重复堆积 |
 
 前四项按「发送到」的设置走（今天的日记 / 指定文档 / 每篇文献一个文档）；
 最后一项**固定**写进这篇文献自己的文档 —— 它本身就是「每篇文献一个文档」那个目的地的手动入口。
 多选条目时，每个条目各执行一次。
+
+「同步这篇文献」写出的每一段都带 `custom-zsi-section`（`info` / `abstract` / `notes`）
+和 `custom-zsi-item-key` 两个属性。再次同步时，插件先写出新的三段，成功后才删除
+**带这两个属性**的旧块：
+
+- 你自己在文档里加的标题、正文、想法不会被删 —— 它们没有这两个属性；
+- 这篇文献的注释笔记也不会被删 —— 它们带的是 `custom-zotero-*` 属性，不是 `custom-zsi-section`；
+- 新内容写失败时旧的三段原样保留（先写后删）；
+- 老版本写出的三段没有属性，升级后第一次同步会再追加一份；从第二次起就是替换了。
+
+> 因为「旧段落」是靠思源里的块属性找回来的，不是靠 Zotero 里的状态，所以换电脑、
+> 换 Zotero 库、隔了很久再同步，都能找到上一次写的那三段。删掉的部分如果已经手动
+> 改过，也会被新内容替换 —— 文档里的事实来源是 Zotero 条目。
 
 子菜单只在选中的是普通条目时出现；右键点在分类、搜索这类没有条目的地方时它自己会藏起来。
 
@@ -546,6 +593,7 @@ zotero-siyuan/
 │   │   │   ├── bytes.js          #       图是什么：类型识别 + 压缩（canvas 两种策略）
 │   │   │   └── assets.js         #       图去哪：写进 assets、压缩缓存、回收
 │   │   ├── siyuan-index.js       #     「已发送」索引（只存在思源里）
+│   │   ├── block-attrs.js        #     每条笔记的块属性：生成 / 解析 / 放在第一个块后面
 │   │   ├── sent-cache.js         #     索引的本地副本：解析 / 序列化 / 上限（纯函数）
 │   │   ├── pending-queue.js      #     待发队列：解析 / 入队 / 重试计数（纯函数）
 │   │   ├── auto-filter.js        #     自动发送的颜色 / 标签 / 类型 / 条目分类过滤（纯函数）
@@ -987,6 +1035,9 @@ siyuan notebook list -w "D:\SiYuan\workspace"
 | 发送后气泡 | ✅ 气泡出现在内容区，带「在思源中打开」 |
 | 设置面板一键插入变量 | ✅ 真的打开 Zotero 的设置窗口，点变量名，模板里就多出 `{{变量}}`，光标停在它后面 |
 | 我的模板（保存/套用/删除） | ✅ 同一个窗口里：存一份 → 改坏它 → 套用回来 → 按两次删除 → 用户的模板库原样复原 |
+| 每条注释的块属性 | ✅ 真实思源 3.8.9：`block append` 保留 IAL，`custom-zotero-annotation-key` 等属性挂在那条笔记的第一个块上 |
+| 文献笔记的分段属性 | ✅ 信息 / 摘要 / 笔记三段各自带 `custom-zsi-section`，分别落在自己的 callout 块上（测试文档已删） |
+| 索引只靠属性也能找到笔记 | ✅ 没有 Zotero 深链、只有 `ial` 的块，扫描和单 PDF 兜底都能建出索引 |
 
 最后这些是插件自己跑出来的：把 `selfTestWrite` 设成 `1`，重启 Zotero，然后
 `%LOCALAPPDATA%\Temp\Zotero\zotero-siyuan-selftest.json` 里会写着 `ok: true`，

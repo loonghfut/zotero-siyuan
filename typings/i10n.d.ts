@@ -36,6 +36,7 @@ export type FluentMessageId =
   | 'item-menu-notes'
   | 'item-no-abstract'
   | 'item-no-annotations'
+  | 'item-no-content'
   | 'item-no-notes'
   | 'item-notes'
   | 'item-page'
