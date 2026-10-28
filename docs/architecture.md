@@ -170,10 +170,10 @@ appendPicture(text, image)    图片 Markdown 插到正文        ← _buildCont
 | `sql`（写前/写后各一次，取差集） | 只有自检要清理时才跑（`collectBlocks`） | 一次（分组要用块行） |
 | **合计** | **≈ 1 次进程** | **≈ 2 次进程**（不再乘 N） |
 
-批量写入的上限不再是 N 个进程，而是一次 `block append`。N 条笔记在同一个 `created` 秒里，
-所以每条末尾带一条不可见的零宽链接（`zsi=batch`）；写入后按 `sort` 顺序把块分组，
-每组记进索引。重启后索引只剩锚点块，替换时用同一批块里的**前一个锚点**找回这条笔记的边界，
-不会把整批都删掉。
+批量写入的上限不再是 N 个进程，而是一次 `block append`。每条笔记整体包成一个**超级块**
+（`{{{row … }}}`），注释 key 以块 IAL 挂在容器上，所以写入后一块对一条，分组是精确的。
+旧版笔记没有超级块，仍按末尾不可见的零宽链接（`zsi=batch`）在 `sort` 顺序里切分；
+重启后替换旧笔记时按同样的锚点找回边界，不会把整批都删掉。
 
 ### 失败时最重要的三件事
 
@@ -193,12 +193,13 @@ appendPicture(text, image)    图片 Markdown 插到正文        ← _buildCont
 和单条走同一套渲染，但**只写一次**：
 
 1. 逐条解析注释、读条目（`_prefetchAnnotationItems` 后台并发读），已发送的按偏好跳过并计数；
-2. 每条调用 `_buildVars` + `_buildContent`，并在末尾追加零宽锚点
-   `[​](zotero://…&zsi=batch)`；
+2. 每条调用 `_buildVars` + `_buildContent`，然后 `markBlock` 包成超级块、
+   属性挂在容器上（`block-attrs.js`）；
 3. 解析一次目标位置（「每篇文献一个文档」下所有注释属于同一篇文献，所以是同一个文档）；
 4. 所有正文用 `\n\n` 连起来，走一次 `_append(..., { collectBlocks: true })`；
-5. 写入返回的顶层块按 `sort` 排序，锚点结束自己那条笔记，前一个锚点之后到它之间就是这条
-   笔记的块；每组的块 id 和 Markdown 都记进索引；
+5. 写入返回的顶层块按 `sort` 排序；每块的 `ial` 里有注释 key 的，一块归一条，
+   且**每一行都能对上号**才接受这份映射（对不上就退回锚点路径）；每组的块 id 和
+   Markdown 都记进索引；
 6. 需要「替换上次」的，在新写入成功之后再删旧块，旧的 ↗ 标记先摘掉。
 
 失败不是只给个数字：气泡里列出前几条的 key 和原因，并提供"重试失败的那几条"和"全部重试"
@@ -243,15 +244,16 @@ appendPicture(text, image)    图片 Markdown 插到正文        ← _buildCont
 | `_sendItemAbstract` | `abstractMarkdown(vars)` |
 | `_sendItemNotes` | 子笔记 HTML → Markdown（`noteHtmlToMarkdown`） |
 | `_sendItemAnnotations` | 汇总各 PDF 的注释 key，交给 `_sendMany`（和阅读器批量同一条路） |
-| `_syncItemDocument` | 固定走 `_resolveItemDocument`，把信息/摘要/笔记写进这篇文献的文档，并替换上一次同步写的那三段 |
+| `_syncItemDocument` | 固定走 `_resolveItemDocument`，把信息/摘要/笔记写进这篇文献的文档，并替换上一次同步写的那个块 |
 
 `_sendItemMarkdown` 按 `destination` 决定写哪里：`item`（或 `itemDocument: true`）用
 `_resolveItemDocument`，`document` 不需要笔记本，其余用 `_resolveDestination`。
 
-`_syncItemDocument` 的三段各自带 `custom-zsi-section`（`info` / `abstract` / `notes`）
-和 `custom-zsi-item-key`。同步时先用这两个属性查出旧块，**新块写成功之后**再删旧块；
-只删带这两个属性的块，所以用户自己加的内容和注释笔记（带 `custom-zotero-*`）不受影响。
-旧段落靠思源里的属性找回，不依赖 Zotero 状态，换机器也能继续替换。
+条目级写入（`_sendItemMarkdown`）先 `markBlock` 包成超级块；「同步这篇文献」的那块带
+`custom-zsi-section="item"` 和 `custom-zsi-item-key`。同步时先按 item key 查出旧块
+（旧版写出的三段也带这个 key），**新块写成功之后**再删旧块；只删带这个属性的块，所以
+用户自己加的内容和注释笔记（带 `custom-zotero-*`）不受影响。旧块靠思源里的属性找回，
+不依赖 Zotero 状态，换机器也能继续替换。
 
 条目级写入不经过 `_sendAnnotation`，所以不参与"已发送"检查、不建立注释索引——
 它送的是整条文献，不是某条注释。
@@ -302,13 +304,16 @@ appendPicture(text, image)    图片 Markdown 插到正文        ← _buildCont
 群组库是**另一条路径**：同样的 key 在群组里是另一个条目，写成个人库那条路径时 Zotero 不会
 报错，它只是在自己的库里找不到、链接什么都不做。所以 `libraryPath(libraryID)` 决定用哪条。
 
-正文之外，每条笔记的**第一个块**还带着注释自己的属性（`block-attrs.js`）：
+正文之外，每条笔记还包在一个**超级块**里，注释自己的属性（`block-attrs.js`）挂在
+容器上：
 
 ```
 custom-zotero-annotation-key / item-key / attachment-key / color / page / tags / modified
 ```
 
-属性以块 IAL（`{: custom-x="y"}`）的形式写在**同一次 `block append`** 里，所以不多起进程。
+属性以块 IAL（`{: custom-x="y"}`）的形式写在**同一次 `block append`** 里（超级块的
+`}}}` 之后一行），所以不多起进程。一次发送就是一个块：`block append` 返回的第一个块
+= 超级块 = 整条笔记，索引、「在思源中打开」、「替换上次」都以它为单位。
 它也把索引从模板里解放出来：模板完全不写 `{{zoteroAnnotationLink}}`，扫描仍然找得到这条笔记。
 索引同时认两条线索：
 
@@ -492,11 +497,13 @@ Zotero 把 `scripts` 数组里的文件**按顺序加载进同一个面板作用
    （外加分组时最多一次 `sql`）。任何"顺手查一下"的 CLI 调用都要先想清楚它是不是每次发送
    都必要——一次 0.6 秒，批量不再乘上去，但单条发送仍然会被它拖慢。
 10. **块属性写在同一批 Markdown 里**（`block-attrs.js` → IAL）。不要为每条注释再调一次
-    `attr set`：那会多一个进程。IAL 值里不能留双引号/反斜杠（思源不把反斜杠当转义），
-    批量锚点也不能追加到 IAL 行上（会截断属性）——`_withBatchAnchor` 已经把锚点放到下一块。
-11. **凡是读 `blocks` 行给发送用的查询，都要 SELECT `ial`**。批量分组用第一个块的属性，
-    「替换上次」用属性判断这条笔记在哪儿结束；少了这一列，前者退化成锚点，后者可能把
-    同一秒写入的整批当成一条。
+    `attr set`：那会多一个进程。IAL 值里不能留双引号/反斜杠（思源不把反斜杠当转义）；
+    属性必须挂在超级块的 `}}}` 之后——挂在最后一个子块后面会标到子块头上。
+11. **凡是读 `blocks` 行给发送用的查询，都要 SELECT `ial`**。批量分组和「替换上次」
+    都靠这一列把块对回笔记；少了它，前者退化成锚点，后者可能把同一秒写入的整批当成一条。
+12. **一次发送 = 一个超级块**（`markBlock`）。属性映射只在「写入返回的每一行都能对上号」
+    时才接受——对不上就退回锚点路径或干脆不映射，宁可让用户再发一次，也不要把删除
+    打到别人的笔记上。
 12. **侧栏每次渲染 header 的代码不能做全文档查询**。一个 PDF 几百条注释，一次渲染就是
     几百次查询；手动标记走 `_manualLinksOf` 的 `WeakMap`，不要退回 `querySelectorAll`。
 13. **异步调用必须 `await`**。`IOUtils.exists()` / `Zotero.Items.getAsync()` 这类返回的是
@@ -539,8 +546,8 @@ Zotero 把 `scripts` 数组里的文件**按顺序加载进同一个面板作用
   被重载后由**旧实例**插入的标记要靠那次扫描找回来——扫描用 `isConnected` 兜底，找不到
   就当它已经被 reader 擦掉了。
 - 批量发送**合并成一次写入**：12 条注释是一个 `block append`，不再串行等 12 个进程。
-  代价是它们落在同一秒里，重启后"这次写入的块"不能只靠创建时间区分。现在每篇的
-  **第一个块**带注释 key（属性），分组和「替换上次」优先按它切分；`zsi=batch` 锚点
+  代价是它们落在同一秒里，重启后"这次写入的块"不能只靠创建时间区分。现在每条笔记
+  各自是超级块、属性挂在容器上，分组和「替换上次」按属性精确切分；`zsi=batch` 锚点
   是升级前老笔记的退路。属性丢失且锚点也丢失时，只有第一条能确定归属，其余的不进索引
   （宁可让用户再发一次，也不要把标记打到别人的笔记上）。
 - 压缩后的图片在内存里留一份（最多 12 张 / 32 MB），所以"同一张图再发一次"不必重新

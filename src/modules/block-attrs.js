@@ -1,16 +1,20 @@
 /**
- * Zotero → SiYuan — the attributes a written block carries.
+ * Zotero → SiYuan — how a sent block is wrapped and what it carries.
  *
  * A Zotero deep link in the Markdown used to be the only thing the index
  * could find a sent annotation by. That made the index depend on the
  * template: a template that never wrote `{{zoteroAnnotationLink}}` produced
  * a note that was invisible to the next scan.
  *
- * Every note now carries custom attributes as well. SiYuan's Markdown
- * parser keeps a block IAL (`{: custom-x="y"}`), so the attributes are
- * written in the same `block append` that writes the note — no second
- * process, no HTTP call. The index can read them back out of the `ial`
- * column, and the user can query or filter by them inside SiYuan.
+ * Every send is now one **super block** (`{{{row … }}}`), and the
+ * annotation's custom attributes are written on that container as a block
+ * IAL (`{: custom-x="y"}`) after the closing marker. One send is therefore
+ * one block: the index points at it, the reader link opens it, and a
+ * replacement deletes it — there is no "which of these blocks belongs to
+ * that note" question left to answer.
+ *
+ * The wrapper and the IAL go in the same `block append` that writes the
+ * note — no second process, no HTTP call, no `attr set`.
  */
 
 /** The annotation this block came from. */
@@ -37,8 +41,18 @@ export const MODIFIED_ATTR = "custom-zotero-modified";
 /** Which part of a literature note a block belongs to. */
 export const SECTION_ATTR = "custom-zsi-section";
 
-/** The item a literature-note section belongs to. */
+/**
+ * The item a literature-note block belongs to.
+ *
+ * Kept as its own attribute name (not `custom-zotero-item-key`) because
+ * that one is already the stamp of the item's document and the attribute of
+ * every annotation note.
+ */
 export const SECTION_ITEM_ATTR = "custom-zsi-item-key";
+
+/** The super-block fence SiYuan's Markdown parser understands. */
+export const SUPER_BLOCK_OPEN = "{{{row";
+export const SUPER_BLOCK_CLOSE = "}}}";
 
 /**
  * Make a value safe to sit between the quotes of an IAL.
@@ -148,109 +162,63 @@ export function annotationAttributesFromIAL(ial) {
 }
 
 /**
- * Put an IAL line after the first block of a note.
+ * Wrap a rendered note in one super block.
  *
- * `block append` answers with the first block it created — that is the block
- * the "open in SiYuan" link and the index point at, so that is the block the
- * attributes have to describe. The first block ends at the first blank line
- * outside a fenced code block; a callout's own blank line is written as
- * `>`, so it does not count.
+ * `block append` answers with the first block it created, and the index and
+ * the "open in SiYuan" link point at that block. Wrapping the whole note
+ * makes "the first block" and "the note" the same thing, so nothing has to
+ * guess where the note ends.
  *
- * A note with no blank line is one block: the line goes at its end. A note
- * that starts with a heading gets the line directly under the heading,
- * because SiYuan treats the heading as a block of its own even when the next
- * line follows without a blank one.
+ * Nested super blocks are legal, so a template that already contains one is
+ * not a special case — it simply becomes a child of this one.
  *
  * @param {String} markdown
- * @param {String} line - an IAL line from `attributeLine`
- * @returns {String}
+ * @returns {String} the wrapped Markdown, or "" when there is nothing to wrap
  */
-export function insertAfterFirstBlock(markdown, line) {
-	const text = String(markdown == null ? "" : markdown);
-	const attrs = String(line || "").trim();
-	if (!attrs) {
-		return text;
-	}
-	const lines = text.split("\n");
-	let first = 0;
-	while (first < lines.length && !lines[first].trim()) {
-		first++;
-	}
-	if (first >= lines.length) {
-		return attrs;
-	}
-	// A heading is a block on its own, even without a blank line after it.
-	if (/^#{1,6}\s/.test(lines[first])) {
-		lines.splice(first + 1, 0, attrs);
-		return lines.join("\n");
-	}
-	let fence = "";
-	for (let i = first; i < lines.length; i++) {
-		const trimmed = lines[i].trim();
-		const fenceMatch = trimmed.match(/^(```+|~~~+)/);
-		if (fenceMatch) {
-			if (!fence) {
-				fence = fenceMatch[1][0];
-			}
-			else if (fenceMatch[1][0] === fence) {
-				fence = "";
-			}
-			continue;
-		}
-		if (fence) {
-			continue;
-		}
-		if (trimmed === "") {
-			lines.splice(i, 0, attrs);
-			return lines.join("\n");
-		}
-	}
-	return `${text.replace(/\s+$/, "")}\n${attrs}`;
-}
-
-/**
- * Put the annotation attributes into a rendered note.
- *
- * @param {String} markdown
- * @param {Object} attrs - from `annotationAttributes`
- * @returns {String}
- */
-export function insertAttributes(markdown, attrs) {
-	const line = attributeLine(attrs);
-	return line ? insertAfterFirstBlock(markdown, line) : String(markdown || "");
-}
-
-/**
- * The attributes of one section of a literature-note document.
- *
- * @param {String} section - "info" | "abstract" | "notes"
- * @param {String} itemKey
- * @returns {Object}
- */
-export function sectionAttributes(section, itemKey = "") {
-	return {
-		[SECTION_ATTR]: section || "",
-		[SECTION_ITEM_ATTR]: itemKey || "",
-	};
-}
-
-/**
- * Mark a section block with the item it belongs to.
- *
- * Each section is a callout, so the IAL line goes directly under it. The
- * sync reads these blocks back by attribute and replaces exactly them —
- * never the user's own blocks, and never the annotation notes.
- *
- * @param {String} markdown - one section (one callout)
- * @param {String} section
- * @param {String} itemKey
- * @returns {String}
- */
-export function withSection(markdown, section, itemKey = "") {
-	const text = String(markdown || "").replace(/\s+$/, "");
+export function wrapSuperBlock(markdown) {
+	const text = String(markdown == null ? "" : markdown)
+		.replace(/^\s+/, "")
+		.replace(/\s+$/, "");
 	if (!text) {
 		return "";
 	}
-	const line = attributeLine(sectionAttributes(section, itemKey));
-	return line ? `${text}\n${line}` : text;
+	return `${SUPER_BLOCK_OPEN}\n\n${text}\n\n${SUPER_BLOCK_CLOSE}`;
+}
+
+/**
+ * Wrap a rendered note and put its attributes on the container.
+ *
+ * The IAL has to follow the closing marker: SiYuan attaches an attribute
+ * line to the last closed block, which is the super block. Writing it after
+ * the last *child* instead would mark that child, not the note.
+ *
+ * @param {String} markdown
+ * @param {Object} [attrs] - from `annotationAttributes`, `itemDocumentAttributes`
+ * @returns {String}
+ */
+export function markBlock(markdown, attrs) {
+	const wrapped = wrapSuperBlock(markdown);
+	if (!wrapped) {
+		return "";
+	}
+	const line = attributeLine(attrs);
+	return line ? `${wrapped}\n${line}` : wrapped;
+}
+
+/**
+ * The attributes of the block one item-document sync writes.
+ *
+ * The whole sync — information, abstract and child notes — is one super
+ * block, so a second sync replaces it as a unit: one block to find, one
+ * block to delete, and the user's own text and the annotation notes are
+ * never part of it.
+ *
+ * @param {String} itemKey
+ * @returns {Object}
+ */
+export function itemDocumentAttributes(itemKey = "") {
+	return {
+		[SECTION_ATTR]: "item",
+		[SECTION_ITEM_ATTR]: itemKey || "",
+	};
 }

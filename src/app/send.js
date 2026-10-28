@@ -6,7 +6,7 @@ import { getString } from "../utils/locale.js";
 import { getPref } from "../utils/prefs.js";
 import {
   annotationAttributes,
-  insertAttributes,
+  markBlock,
 } from "../modules/block-attrs.js";
 import { siyuanBlockLink } from "../modules/metadata.js";
 import {
@@ -390,10 +390,10 @@ export default {
         vars,
         template,
       });
-      // The attributes go in the same write as the note: `block append`
-      // keeps a block IAL, so the index does not have to depend on the
-      // template having written a Zotero link.
-      markdown = insertAttributes(markdown, annotationAttributes(vars));
+      // The whole note is one super block, and its attributes are written on
+      // that container in the same `block append`: the index, the reader
+      // link and "replace" then all work with one block id.
+      markdown = markBlock(markdown, annotationAttributes(vars));
     }
     catch (e) {
       // The picture goes into the workspace while the content is built, so

@@ -386,9 +386,10 @@ export default {
   /**
    * The blocks a previous send wrote.
    *
-   * The index remembers them when the send happened in this session. After
-   * a restart only the anchor block is known, so the siblings are looked up
-   * by the creation second the way the index scan does it.
+   * A note sent by this version is one super block, so the entry's own block
+   * is the whole note. For a note written before that (several blocks
+   * closed by a `zsi=batch` anchor), the siblings are looked up by the
+   * creation second the way the index scan does it.
    *
    * @param {Object} entry - an entry from `SiYuanIndex.getEntry`
    * @returns {Promise<Object[]>} rows with id, markdown and type
@@ -412,15 +413,26 @@ export default {
         entry.documentID,
       );
       if (rows.length) {
-        // A batch writes every note in the same second. The index now points
-        // at the note's *first* block (the one that carries the attributes),
-        // not at the anchor at its end — so the batch has to be recognised
-        // from the rows, not only from the entry's own Markdown.
-        const isBatch = rows.some((row) =>
+        const anchorBatch = rows.some((row) =>
           String((row && row.markdown) || "").includes("zsi=batch")
         ) || String(entry.markdown || "").includes("zsi=batch");
-        if (isBatch) {
+        if (anchorBatch) {
           return this._rowsOfOneBatchNote(rows, entry.blockID);
+        }
+        // A super block carries the annotation key itself, and it is the
+        // whole note. Returning only it keeps "replace" off the notes that
+        // share the same creation second.
+        const marked = rows.filter((row) =>
+          attributeValue(row && row.ial, ANNOTATION_KEY_ATTR)
+        );
+        if (
+          marked.length > 1 ||
+          marked.some((row) => row.id === entry.blockID)
+        ) {
+          const own = marked.find((row) => row.id === entry.blockID);
+          return own
+            ? [own]
+            : [{ id: entry.blockID, markdown: entry.markdown || "", type: "" }];
         }
         return rows;
       }
@@ -436,20 +448,14 @@ export default {
   /**
    * The blocks of one note in a batch, from all the blocks of that second.
    *
-   * A batch writes all of its notes in one append, so they share a creation
-   * second. Two ways to tell where a note ends:
-   *
-   * - the note's first block carries the annotation attribute, and the next
-   *   note's first block starts the next note;
-   * - a note written before the attributes existed ends at its invisible
-   *   anchor, which also marks the end of its neighbour.
-   *
-   * The attribute path is tried first because the index points at the first
-   * block now — walking back to the previous anchor from there would leave
-   * out every block after the first one.
+   * Only a batch written before the super block has to be taken apart: its
+   * notes share a creation second, and each one ends at its invisible
+   * `zsi=batch` anchor. The entry's block may be a note's first block (one
+   * with the annotation attribute) or its anchor; either way the slice runs
+   * from the previous anchor to this note's end.
    *
    * @param {Object[]} rows - the blocks of the write, in `sort` order
-   * @param {String} blockID - the first block of this note, or its anchor
+   * @param {String} blockID - the anchor block of this note, or its first
    * @returns {Object[]}
    */
   _rowsOfOneBatchNote(rows, blockID) {
@@ -458,11 +464,9 @@ export default {
     if (at === -1) {
       return list.slice();
     }
-    // The index's block is the note's first block when it carries the
-    // annotation attribute. The note ends at its own anchor — or, if that
-    // anchor was lost, where the next note's first block begins. Stopping at
-    // the anchor also keeps the slice right when the *next* note's first
-    // block has no attribute for some reason.
+    // The entry points at a block that carries the annotation attribute —
+    // one note's first block. The note ends at its own anchor; when that
+    // anchor was lost, at the next note's first block.
     if (attributeValue(list[at].ial, ANNOTATION_KEY_ATTR)) {
       let end = list.length;
       for (let i = at + 1; i < list.length; i++) {
@@ -477,6 +481,8 @@ export default {
       }
       return list.slice(at, end);
     }
+    // The entry points at an anchor. The note started after the previous
+    // anchor — or at the first block of the write.
     let start = 0;
     for (let i = at - 1; i >= 0; i--) {
       if (String((list[i] && list[i].markdown) || "").includes("zsi=batch")) {

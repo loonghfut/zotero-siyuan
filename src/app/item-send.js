@@ -9,7 +9,11 @@
  */
 
 import { getString } from "../utils/locale.js";
-import { withSection } from "../modules/block-attrs.js";
+import {
+  SECTION_ITEM_ATTR,
+  itemDocumentAttributes,
+  markBlock,
+} from "../modules/block-attrs.js";
 import {
   collectMetadata,
   siyuanBlockLink,
@@ -94,17 +98,21 @@ export default {
    *   document, whatever the destination preference says
    * @param {Object} [options.vars] - the template variables the caller
    *   already collected; looking them up again would repeat the library reads
+   * @param {Object} [options.attrs] - block attributes for the super block
+   *   this write becomes; the item sync uses them to find itself again
    * @returns {Promise<Object|null>} what the write answered
    */
   async _sendItemMarkdown(
     item,
     markdown,
-    { itemDocument = false, vars = null } = {},
+    { itemDocument = false, vars = null, attrs = null } = {},
   ) {
     const text = String(markdown || "").trim();
     if (!text) {
       return null;
     }
+    // Every item-level write is one super block, so one send is one block.
+    const content = markBlock(text, attrs || {});
     // The same lock the annotation sends use: an item write and a batch
     // must not be in the workspace at once.
     if (this._sending || this._shutDown) {
@@ -127,7 +135,7 @@ export default {
     }
     this._sending = true;
     try {
-      return await this._writeItemMarkdown(item, text, itemDocument, vars);
+      return await this._writeItemMarkdown(item, content, itemDocument, vars);
     }
     finally {
       this._sending = false;
@@ -301,30 +309,30 @@ export default {
   /**
    * The three sections of a literature-note document.
    *
-   * Each child note is its own callout, so `withSection` marks exactly one
-   * block per section. The attributes are what a later sync uses to find and
-   * replace those blocks — without touching the user's own text or the
-   * annotation notes.
+   * Each child note is its own callout, so the sync writes the same shapes
+   * a hand-made literature note uses. The whole result is wrapped in one
+   * super block by `_sendItemMarkdown`, and the item key is attached to
+   * that container — a later sync finds and replaces the unit without
+   * touching the user's own text or the annotation notes.
    *
    * @param {Object} vars
    * @param {String[]} notes - Markdown of each child note
    * @returns {String}
    */
   _itemSectionMarkdown(vars, notes = []) {
-    const itemKey = String(vars.itemKey || vars.attachmentKey || "");
     const sections = [];
     const info = itemInfoMarkdown(vars);
     if (info) {
-      sections.push(withSection(info, "info", itemKey));
+      sections.push(info);
     }
     const abstract = abstractMarkdown(vars);
     if (abstract) {
-      sections.push(withSection(abstract, "abstract", itemKey));
+      sections.push(abstract);
     }
     for (const note of Array.isArray(notes) ? notes : []) {
       const text = notesMarkdown(vars, [note]);
       if (text) {
-        sections.push(withSection(text, "notes", itemKey));
+        sections.push(text);
       }
     }
     return sections.join("\n\n");
@@ -333,10 +341,13 @@ export default {
   /**
    * The blocks a previous sync left in the item's document.
    *
-   * The section attributes are the whole record: nothing is kept in Zotero,
-   * so a sync after a restart — or on another machine — finds the same
-   * blocks. The item key scopes the query: a document that accidentally
-   * holds two papers' sections does not lose the other one's.
+   * The attributes are the whole record: nothing is kept in Zotero, so a
+   * sync after a restart — or on another machine — finds the same block.
+   * This version writes one super block per sync (`custom-zsi-section` =
+   * "item"); earlier versions wrote one block per section, and those still
+   * answer the same query, so an upgrade replaces them all on the first
+   * sync. The item key scopes the query: a document that accidentally holds
+   * two papers' blocks does not lose the other one's.
    *
    * @param {String} documentID
    * @param {Object} vars
@@ -354,8 +365,7 @@ export default {
     const statement =
       "SELECT id FROM blocks " +
       `WHERE root_id = '${documentID}' AND type != 'd' ` +
-      "AND ial LIKE '%custom-zsi-section=%' " +
-      `AND ial LIKE '%custom-zsi-item-key="${itemKey}"%' ` +
+      `AND ial LIKE '%${SECTION_ITEM_ATTR}="${itemKey}"%' ` +
       "ORDER BY sort ASC";
     try {
       const http = await this._httpClient();
@@ -382,11 +392,12 @@ export default {
   /**
    * Write the item's literature-note document, replacing a previous sync.
    *
-   * The document is reused, and the information / abstract / notes blocks
-   * are replaced instead of appended. The new sections go in **first**: a
-   * failed write must not leave the document with no details at all. Only
-   * blocks carrying both section markers are deleted, so the user's own
-   * text and the annotation notes stay where they are.
+   * The whole sync is one super block carrying the item key. A later sync
+   * finds it by that attribute and deletes exactly that block, so the
+   * information / abstract / notes are replaced as a unit — the user's own
+   * text and the annotation notes are never part of it. The new block goes
+   * in **first**: a failed write must not leave the document with no
+   * details at all.
    *
    * @param {Object} item
    * @returns {Promise<Object|null>}
@@ -407,14 +418,16 @@ export default {
       );
       return null;
     }
-    // The document has to be known before the write: its old sections are
-    // read first, and they are only removed once the new ones are in.
+    const itemKey = String(vars.itemKey || vars.attachmentKey || "");
+    // The document has to be known before the write: its old block is read
+    // first, and it is only removed once the new one is in.
     const notebook = await this._resolveNotebook();
     const destination = await this._resolveItemDocument(notebook, vars);
     const previous = await this._sectionBlockIDs(destination.documentID, vars);
     const written = await this._sendItemMarkdown(item, text, {
       itemDocument: true,
       vars,
+      attrs: itemDocumentAttributes(itemKey),
     });
     if (written && previous.length) {
       const deleted = await this._deleteBlocks(previous);

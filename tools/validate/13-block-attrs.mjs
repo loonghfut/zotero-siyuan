@@ -1,9 +1,9 @@
 /**
- * Zotero → SiYuan — the attributes a sent note carries.
+ * Zotero → SiYuan — how a sent note is wrapped and what it carries.
  *
  * The index used to depend on the template writing a Zotero link. These
- * checks guard the second way in — the block IAL — and the idempotent
- * sections of a literature-note document.
+ * checks guard the second way in — the block IAL on a super block — and the
+ * idempotent block a literature-note sync writes.
  *
  * Part of `node tools/validate.mjs`: this file runs when it is imported, and
  * the entry point prints the summary.
@@ -95,12 +95,19 @@ section("Block attributes — the IAL");
   );
 }
 
-/* ------------------- 13b. where the attribute line goes ----------------- */
+/* ------------------- 13b. wrapping and where the IAL goes ---------------- */
 
-section("Block attributes — placement");
+section("Block attributes — the super block");
 {
-  const { annotationAttributes, insertAttributes, parseAttributes, ANNOTATION_KEY_ATTR } =
-    blockAttrs;
+  const {
+    ANNOTATION_KEY_ATTR,
+    SUPER_BLOCK_CLOSE,
+    SUPER_BLOCK_OPEN,
+    annotationAttributes,
+    markBlock,
+    parseAttributes,
+    wrapSuperBlock,
+  } = blockAttrs;
   const attrs = annotationAttributes({
     annotationId: "ABCD1234",
     itemKey: "ITEM0001",
@@ -114,54 +121,64 @@ section("Block attributes — placement");
     "> [!note] 批注",
     "> the comment",
   ].join("\n");
-  const marked = insertAttributes(note, attrs);
+  const marked = markBlock(note, attrs);
   const lines = marked.split("\n");
-  const at = lines.findIndex((line) => line.startsWith("{: "));
   check(
-    "the attributes follow the first block",
-    at === 2 && lines[0].startsWith(">") && lines[1].startsWith(">"),
-    `line ${at}: ${lines[at]}`,
+    "the note is one super block",
+    lines[0] === SUPER_BLOCK_OPEN && lines.includes(SUPER_BLOCK_CLOSE),
+    lines.slice(0, 2).join(" / "),
   );
   check(
-    "the attribute line is not part of the callout",
-    !lines[at].startsWith(">"),
+    "the attributes follow the closing marker",
+    lines[lines.length - 2] === SUPER_BLOCK_CLOSE &&
+      lines[lines.length - 1].startsWith("{: "),
+    lines.slice(-2).join(" / "),
   );
   check(
-    "the attributes name this annotation",
-    parseAttributes(lines[at])[ANNOTATION_KEY_ATTR] === "ABCD1234",
-    lines[at],
+    "the attributes are on the container, not on a callout",
+    parseAttributes(lines[lines.length - 1])[ANNOTATION_KEY_ATTR] ===
+      "ABCD1234",
+    lines[lines.length - 1],
   );
   check(
-    "the rest of the note is unchanged",
-    marked.includes("> [!note] 批注"),
+    "the note itself is unchanged inside the wrapper",
+    marked.includes("> [!quote] 摘录 · Title") &&
+      marked.includes("> [!note] 批注"),
   );
 
-  const single = insertAttributes("> only one block", attrs);
+  const single = markBlock("> only one block", attrs);
   check(
-    "a one-block note keeps its attributes after it",
-    single.startsWith("> only one block\n{: ") &&
-      parseAttributes(single.split("\n")[1])["custom-zotero-annotation-key"] ===
-        "ABCD1234",
+    "a one-block note is wrapped too",
+    single.startsWith(`${SUPER_BLOCK_OPEN}\n\n> only one block\n\n`) &&
+      single.split("\n").pop().startsWith("{: "),
     single,
   );
 
-  const heading = insertAttributes("## Heading\ntext", attrs);
+  const heading = markBlock("## Heading\ntext", attrs);
   check(
-    "a note that starts with a heading puts the attributes under it",
-    heading.split("\n")[1].startsWith("{: "),
+    "a heading stays inside the wrapper",
+    heading.includes("## Heading\ntext\n\n}}}"),
     heading,
   );
 
-  const fenced = insertAttributes(
-    ["```", "code", "", "more", "```", "", "after"].join("\n"),
+  const nested = markBlock(
+    "{{{row\n\n> a nested block\n\n}}}",
     attrs,
   );
-  const fencedLines = fenced.split("\n");
-  const fenceAt = fencedLines.findIndex((line) => line.startsWith("{: "));
   check(
-    "a blank line inside a code fence is not a block boundary",
-    fenceAt === 5 && fencedLines[4] === "```",
-    `line ${fenceAt}: ${fencedLines[fenceAt]}`,
+    "a template that already has a super block is nested, not broken",
+    nested.startsWith(`${SUPER_BLOCK_OPEN}\n\n{{{row`) &&
+      nested.split("\n").pop().startsWith("{: "),
+    nested,
+  );
+
+  check(
+    "empty content produces no block",
+    wrapSuperBlock("   \n\n") === "" && markBlock("", attrs) === "",
+  );
+  check(
+    "a write without attributes is still one super block",
+    markBlock("> plain", {}).split("\n").pop() === SUPER_BLOCK_CLOSE,
   );
 }
 
@@ -179,14 +196,14 @@ section("Block attributes — the index");
     {
       id: "20260101000000-aaaaaaa",
       markdown: "> quote without a link",
-      type: "callout",
+      type: "s",
       root_id: "20260101000000-docdocd",
       ial,
     },
     {
       id: "20260101000000-bbbbbbb",
       markdown: "metadata without a link",
-      type: "p",
+      type: "s",
       root_id: "20260101000000-docdocd",
       ial,
     },
@@ -240,27 +257,52 @@ section("Block attributes — batch grouping");
 {
   const { ANNOTATION_KEY_ATTR } = blockAttrs;
   const batch = batchModule.default;
+  // One super block per note, which is exactly one row per note.
   const rows = [
     {
       id: "b1",
       markdown: "> quote one",
       ial: `{: ${ANNOTATION_KEY_ATTR}="KEY1"}`,
     },
-    { id: "b2", markdown: "metadata one", ial: "" },
     {
-      id: "b3",
+      id: "b2",
       markdown: "> quote two",
       ial: `{: ${ANNOTATION_KEY_ATTR}="KEY2"}`,
     },
-    { id: "b4", markdown: "metadata two", ial: "" },
   ];
   const grouped = batch._groupBatchRows(rows, [{ key: "KEY1" }, { key: "KEY2" }]);
   check(
-    "a batch is grouped by the first block's attribute",
+    "a batch maps each super block to its own annotation",
     grouped.mapped &&
-      grouped.groups[0].join(",") === "b1,b2" &&
-      grouped.groups[1].join(",") === "b3,b4",
+      grouped.groups[0].join(",") === "b1" &&
+      grouped.groups[1].join(",") === "b2",
     JSON.stringify(grouped.groups),
+  );
+
+  // A row the write cannot account for must not be guessed at: an old
+  // implementation put it under the previous note, and "replace" then
+  // deleted a neighbour.
+  const partial = [
+    {
+      id: "p1",
+      markdown: "> quote one",
+      ial: `{: ${ANNOTATION_KEY_ATTR}="KEY1"}`,
+    },
+    { id: "p2", markdown: "a block without an attribute", ial: "" },
+    {
+      id: "p3",
+      markdown: "> quote two",
+      ial: `{: ${ANNOTATION_KEY_ATTR}="KEY2"}`,
+    },
+  ];
+  const partialGroups = batch._groupBatchRows(partial, [
+    { key: "KEY1" },
+    { key: "KEY2" },
+  ]);
+  check(
+    "a row without an attribute is not attributed to a neighbour",
+    partialGroups.mapped === false,
+    JSON.stringify(partialGroups),
   );
 
   const anchorRows = [
@@ -289,51 +331,77 @@ section("Block attributes — batch grouping");
     JSON.stringify(anchored.groups),
   );
 
-  const oneBlock = batch._withBatchAnchor(
-    '> one block\n{: custom-zotero-annotation-key="KEY1"}',
-    { zoteroAnnotationLink: "zotero://open/library/items/A?annotation=KEY1" },
-  );
-  const oneLines = oneBlock.split("\n");
+  // After a restart the index points at the note's super block. Replacing
+  // that note must take only it — not the other notes of the same second.
+  const transport = transportModule.default;
+  const superRows = [
+    {
+      id: "s1",
+      markdown: "> quote one",
+      ial: `{: ${ANNOTATION_KEY_ATTR}="KEY1"}`,
+    },
+    {
+      id: "s2",
+      markdown: "> quote two",
+      ial: `{: ${ANNOTATION_KEY_ATTR}="KEY2"}`,
+    },
+  ];
+  const fakeBatch = {
+    getCLI() {
+      return {
+        async blocksOfSend() {
+          return superRows;
+        },
+      };
+    },
+    _rowsOfOneBatchNote: transport._rowsOfOneBatchNote,
+  };
+  const recovered = await transport._sentBlockRows.call(fakeBatch, {
+    blockID: "s2",
+    documentID: "20260101000000-docdocd",
+    blocks: [],
+    markdown: "> quote two",
+  });
   check(
-    "the batch anchor never lands inside the attribute line",
-    oneLines[1].startsWith("{: ") && oneLines[2] === "" &&
-      oneLines[3].includes("zsi=batch"),
-    oneBlock,
+    "a stored entry takes its own super block, not the whole batch",
+    recovered.map((row) => row.id).join(",") === "s2",
+    recovered.map((row) => row.id).join(","),
   );
 
-  // After a restart the index points at the note's first block, because that
-  // is the one with the attributes. Replacing the note must still take only
-  // that note's blocks — not the whole batch of the same second.
-  const transport = transportModule.default;
-  const batchRows = [
-    { id: "n1a", markdown: "> quote one", ial: `{: ${ANNOTATION_KEY_ATTR}="KEY1"}` },
-    { id: "n1b", markdown: "metadata one", ial: "" },
-    { id: "n1c", markdown: "meta [x](zotero://x?annotation=KEY1&zsi=batch)", ial: "" },
-    { id: "n2a", markdown: "> quote two", ial: `{: ${ANNOTATION_KEY_ATTR}="KEY2"}` },
-    { id: "n2b", markdown: "metadata two", ial: "" },
-    { id: "n2c", markdown: "meta [x](zotero://x?annotation=KEY2&zsi=batch)", ial: "" },
+  // A single send after a restart: a user block written in the same second
+  // must not come along, because the note is not that block.
+  const withUserRow = [
+    { id: "u1", markdown: "a user paragraph", ial: "" },
+    {
+      id: "s1",
+      markdown: "> quote one",
+      ial: `{: ${ANNOTATION_KEY_ATTR}="KEY1"}`,
+    },
   ];
-  const second = transport._rowsOfOneBatchNote(batchRows, "n2a");
+  const fakeSingle = {
+    getCLI() {
+      return {
+        async blocksOfSend() {
+          return withUserRow;
+        },
+      };
+    },
+    _rowsOfOneBatchNote: transport._rowsOfOneBatchNote,
+  };
+  const single = await transport._sentBlockRows.call(fakeSingle, {
+    blockID: "s1",
+    documentID: "20260101000000-docdocd",
+    blocks: [],
+    markdown: "> quote one",
+  });
   check(
-    "a note is taken from its first block to the next note's first block",
-    second.map((row) => row.id).join(",") === "n2a,n2b,n2c",
-    second.map((row) => row.id).join(","),
+    "a user block from the same second is not part of the note",
+    single.map((row) => row.id).join(",") === "s1",
+    single.map((row) => row.id).join(","),
   );
-  // If the next note's attributes did not make it into SiYuan, its first
-  // block cannot bound this note — the anchor still can.
-  const mixedRows = [
-    { id: "m1a", markdown: "> quote one", ial: `{: ${ANNOTATION_KEY_ATTR}="KEY1"}` },
-    { id: "m1b", markdown: "metadata one", ial: "" },
-    { id: "m1c", markdown: "meta [x](zotero://x?annotation=KEY1&zsi=batch)", ial: "" },
-    { id: "m2a", markdown: "> quote two", ial: "" },
-    { id: "m2b", markdown: "meta [x](zotero://x?annotation=KEY2&zsi=batch)", ial: "" },
-  ];
-  const bounded = transport._rowsOfOneBatchNote(mixedRows, "m1a");
-  check(
-    "the anchor still ends the note when the next one has no attributes",
-    bounded.map((row) => row.id).join(",") === "m1a,m1b,m1c",
-    bounded.map((row) => row.id).join(","),
-  );
+
+  // Notes written before the super block still carry the invisible anchor;
+  // they keep working the old way.
   const oldRows = [
     { id: "o1a", markdown: "> quote one", ial: "" },
     { id: "o1b", markdown: "meta [x](zotero://x?annotation=KEY1&zsi=batch)", ial: "" },
@@ -342,48 +410,55 @@ section("Block attributes — batch grouping");
   ];
   const oldSecond = transport._rowsOfOneBatchNote(oldRows, "o2b");
   check(
-    "a note written before the attributes still ends at its anchor",
+    "a note written before the super block still ends at its anchor",
     oldSecond.map((row) => row.id).join(",") === "o2a,o2b",
     oldSecond.map((row) => row.id).join(","),
   );
-
-  const fake = {
+  const fakeOld = {
     getCLI() {
       return {
         async blocksOfSend() {
-          return batchRows;
+          return oldRows;
         },
       };
     },
     _rowsOfOneBatchNote: transport._rowsOfOneBatchNote,
   };
-  const recovered = await transport._sentBlockRows.call(fake, {
-    blockID: "n2a",
+  const oldRecovered = await transport._sentBlockRows.call(fakeOld, {
+    blockID: "o2b",
     documentID: "20260101000000-docdocd",
     blocks: [],
-    markdown: "> quote two",
+    markdown: "",
   });
   check(
-    "a stored entry that points at the first block does not take the batch",
-    recovered.map((row) => row.id).join(",") === "n2a,n2b,n2c",
-    recovered.map((row) => row.id).join(","),
+    "an old batch is still sliced by its anchor",
+    oldRecovered.map((row) => row.id).join(",") === "o2a,o2b",
+    oldRecovered.map((row) => row.id).join(","),
   );
 }
 
-/* ---------------- 13e. sections of a literature-note document ----------- */
+/* ---------------- 13e. the block a literature-note sync writes ----------- */
 
-section("Block attributes — item sections");
+section("Block attributes — item sync");
 {
-  const { SECTION_ATTR, withSection } = blockAttrs;
+  const { SECTION_ATTR, SECTION_ITEM_ATTR, itemDocumentAttributes, markBlock } =
+    blockAttrs;
   const item = itemModule.default;
 
-  const marked = withSection("> [!abstract] 摘要\n> body", "abstract", "ITEM1");
+  const attrs = itemDocumentAttributes("ITEM1");
   check(
-    "a section carries its own marker and item",
-    marked.includes(`${SECTION_ATTR}="abstract"`) &&
-      marked.includes('custom-zsi-item-key="ITEM1"') &&
-      marked.split("\n").pop().startsWith("{: "),
-    marked,
+    "the sync block names the item and its kind",
+    attrs[SECTION_ATTR] === "item" && attrs[SECTION_ITEM_ATTR] === "ITEM1",
+    JSON.stringify(attrs),
+  );
+  const sync = markBlock("> [!note] 文献信息\n> body", attrs);
+  const last = sync.split("\n").pop();
+  check(
+    "the sync is one marked super block",
+    sync.startsWith("{{{row\n\n") &&
+      last.includes(`${SECTION_ATTR}="item"`) &&
+      last.includes(`${SECTION_ITEM_ATTR}="ITEM1"`),
+    last,
   );
 
   const text = item._itemSectionMarkdown(
@@ -397,17 +472,16 @@ section("Block attributes — item sections");
   );
   check(
     "the document has an info and an abstract section",
-    text.includes(`${SECTION_ATTR}="info"`) &&
-      text.includes(`${SECTION_ATTR}="abstract"`),
+    text.includes("[!note]") && text.includes("[!abstract]"),
   );
   check(
-    "each child note is marked on its own",
-    (text.match(new RegExp(`${SECTION_ATTR}="notes"`, "g")) || []).length === 2,
+    "each child note is its own callout",
+    (text.match(/\[!note\]/g) || []).length === 3,
     text,
   );
   check(
-    "every section names the item it belongs to",
-    (text.match(/custom-zsi-item-key="ITEM1"/g) || []).length === 4,
+    "the sections are not marked one by one any more",
+    !text.includes(SECTION_ATTR) && !text.includes(SECTION_ITEM_ATTR),
     text,
   );
 
@@ -428,15 +502,14 @@ section("Block attributes — item sections");
     { itemKey: "ITEM1" },
   );
   check(
-    "the old sections are found by both markers",
+    "the old sync block is found by the item key",
     ids.length === 1 &&
-      /custom-zsi-section/.test(calls[0]) &&
-      /custom-zsi-item-key="ITEM1"/.test(calls[0]) &&
+      new RegExp(`${SECTION_ITEM_ATTR}="ITEM1"`).test(calls[0]) &&
       /root_id = '20260101000000-docdocd'/.test(calls[0]),
     calls[0],
   );
   check(
-    "a document without a key has no sections",
+    "a document without a key has no blocks",
     (await item._sectionBlockIDs.call(fake, "not-an-id", { itemKey: "ITEM1" }))
       .length === 0,
   );
@@ -447,27 +520,39 @@ section("Block attributes — item sections");
 section("Block attributes — wiring");
 {
   check(
-    "a single send writes the attributes in the same append",
-    /insertAttributes\(\s*markdown,\s*annotationAttributes\(vars\)/.test(
+    "a single send wraps the note and marks the container",
+    /markBlock\(markdown,\s*annotationAttributes\(vars\)\)/.test(
       readSrc("app/send.js"),
     ),
   );
   check(
-    "a batch send writes them too",
-    /insertAttributes\(markdown, annotationAttributes\(vars\)\)/.test(
+    "a batch send wraps every note",
+    /markBlock\(markdown,\s*annotationAttributes\(vars\)\)/.test(
       readSrc("app/send-batch.js"),
     ) &&
-      /attributeValue\(row\.ial, ANNOTATION_KEY_ATTR\)/.test(
+      /attributeValue\(row && row\.ial, ANNOTATION_KEY_ATTR\)/.test(
         readSrc("app/send-batch.js"),
       ),
+  );
+  check(
+    "an item-level write is wrapped",
+    /const content = markBlock\(text, attrs/.test(readSrc("app/item-send.js")),
+  );
+  check(
+    "the item sync marks its block with the item key",
+    /itemDocumentAttributes\(itemKey\)/.test(readSrc("app/item-send.js")),
   );
   check(
     "the item menu offers the sync",
     readSrc("app/item-menu.js").includes('"_syncItemDocument"'),
   );
   check(
-    "the item document replaces its old sections",
+    "the item document replaces its old block",
     /_sectionBlockIDs/.test(readSrc("app/item-send.js")) &&
       /_deleteBlocks\(previous\)/.test(readSrc("app/item-send.js")),
+  );
+  check(
+    "the old anchor is no longer written",
+    !readSrc("app/send-batch.js").includes("_withBatchAnchor"),
   );
 }

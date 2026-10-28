@@ -7,10 +7,9 @@
  * which is one process for the whole batch.
  *
  * One append produces many blocks, so the write has to say which block
- * belongs to which annotation. Every note ends with an invisible link that
- * carries `zsi=batch`; the blocks of the write are ordered by the document's
- * own `sort` column, so the link closes its note and the next block starts
- * the next one.
+ * belongs to which annotation. Every note is wrapped in its own super block
+ * and carries the annotation key on that container, so the mapping is
+ * exact: one block per note.
  */
 
 import { getString } from "../utils/locale.js";
@@ -18,7 +17,7 @@ import {
   ANNOTATION_KEY_ATTR,
   annotationAttributes,
   attributeValue,
-  insertAttributes,
+  markBlock,
 } from "../modules/block-attrs.js";
 import { siyuanBlockLink } from "../modules/metadata.js";
 import { parseAnnotationKey } from "../modules/siyuan-index.js";
@@ -319,10 +318,9 @@ export default {
           built.push({
             ...job,
             vars,
-            markdown: this._withBatchAnchor(
-              insertAttributes(markdown, annotationAttributes(vars)),
-              vars,
-            ),
+            // One super block per note: the attributes sit on the container,
+            // so the block the append returns is the whole note.
+            markdown: markBlock(markdown, annotationAttributes(vars)),
           });
         }
         catch (e) {
@@ -454,52 +452,17 @@ export default {
   },
 
   /**
-   * Mark the end of one note in a batch.
-   *
-   * The link is invisible (its text is a zero-width space), so it does not
-   * change what the note looks like — but it is in the block's Markdown, so
-   * the written blocks can be grouped by the note they close.
-   *
-   * @param {String} markdown
-   * @param {Object} vars - the template variables
-   * @returns {String}
-   */
-  _withBatchAnchor(markdown, vars) {
-    const text = String(markdown || "").replace(/\s+$/, "");
-    const link = String((vars && vars.zoteroAnnotationLink) || "").trim();
-    if (!link) {
-      // Without a link there is nothing to recognise the note by. The
-      // content still goes in; only the exact block mapping is lost.
-      return text;
-    }
-    const anchor = `[​](${link}${link.includes("?") ? "&" : "?"}zsi=batch)`;
-    const lines = text.split("\n");
-    let last = lines.length - 1;
-    while (last >= 0 && !lines[last].trim()) {
-      last--;
-    }
-    if (last < 0) {
-      return anchor;
-    }
-    if (/^\s*\{:/.test(lines[last])) {
-      // The last line is the block IAL. Appending the link to it would put
-      // the link inside the attribute line, and SiYuan would drop the IAL —
-      // so the anchor gets a block of its own after the note.
-      lines.splice(last + 1, 0, "", anchor);
-      return lines.join("\n");
-    }
-    lines[last] = `${lines[last]} ${anchor}`;
-    return lines.join("\n");
-  },
-
-  /**
    * Group the blocks of one write by the annotation they belong to.
    *
-   * The rows come back in document order (`sort`), which is the order the
-   * notes were written in. Every note's **first** block carries the
-   * annotation key as an attribute, so that is the primary map — it works
-   * even when the template never wrote a Zotero link. The `zsi=batch` anchor
-   * is the fallback for a write made before the attributes existed.
+   * Every note is one super block carrying its annotation key, so a row maps
+   * to its note by that attribute alone — the order of the rows, the number
+   * of blocks per note and whether the template wrote a Zotero link do not
+   * matter. The mapping is accepted only when **every** row of the write is
+   * accounted for; a partial answer would let "replace" delete a neighbour.
+   *
+   * The `zsi=batch` anchor is the fallback for a note written before the
+   * super block existed: those rows carry no attribute, so the anchor says
+   * where each note ends.
    *
    * @param {Object[]} blockRows - rows with id, markdown and ial
    * @param {Object[]} jobs - the notes, in write order
@@ -514,25 +477,23 @@ export default {
         byKey.set(job.key, index);
       }
     });
-    // The first block of a note says which note it starts. This does not
-    // need the invisible anchor at all — which matters when the template
-    // never wrote a link and `_withBatchAnchor` had nothing to attach to.
-    if (rows.some((row) => attributeValue(row.ial, ANNOTATION_KEY_ATTR))) {
-      const byAttribute = jobs.map(() => []);
-      let current = -1;
-      for (const row of rows) {
-        const key = attributeValue(row.ial, ANNOTATION_KEY_ATTR) ||
-          parseAnnotationKey(row.markdown);
-        if (key && byKey.has(key)) {
-          current = byKey.get(key);
-        }
-        if (current >= 0 && byAttribute[current]) {
-          byAttribute[current].push(row.id);
-        }
+    const byAttribute = jobs.map(() => []);
+    let attributed = 0;
+    for (const row of rows) {
+      const key = attributeValue(row && row.ial, ANNOTATION_KEY_ATTR);
+      const at = byKey.get(key);
+      if (at === undefined) {
+        continue;
       }
-      if (byAttribute.every((group) => group.length > 0)) {
-        return { groups: byAttribute, mapped: true };
-      }
+      byAttribute[at].push(row.id);
+      attributed++;
+    }
+    if (
+      rows.length > 0 &&
+      attributed === rows.length &&
+      byAttribute.every((group) => group.length > 0)
+    ) {
+      return { groups: byAttribute, mapped: true };
     }
     const anchors = new Set();
     for (const row of rows) {
