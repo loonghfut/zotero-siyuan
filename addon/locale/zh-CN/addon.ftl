@@ -17,6 +17,7 @@ toast-batch-failed = %d 条失败
 toast-batch-skipped = 跳过 %d 条（已经发过）
 toast-batch-failed-title = 有部分内容没能发送
 toast-batch-retry = 重试失败的那几条
+toast-batch-retry-all = 全部重试
 toast-batch-more = 还有 %d 条
 toast-missing-annotation = 这条注释已不在文库中
 
@@ -31,6 +32,36 @@ target-document-not-found = 找不到标题为「%s」的文档。
 item-document-failed = 无法为这篇文献创建思源文档：%s
 menu-send-one = 发送到思源笔记
 menu-send-many = 把 %d 条注释发送到思源笔记
+
+item-menu = 发送到思源笔记
+item-menu-info = 发送条目信息
+item-menu-abstract = 发送摘要
+item-menu-notes = 发送笔记
+item-menu-annotations = 发送全部注释
+item-menu-document = 新建文献笔记文档
+
+item-sent-title = 已发送到思源笔记
+item-failed-title = 无法把条目发送到思源笔记
+item-no-abstract = 这个条目没有摘要。
+item-no-notes = 这个条目没有笔记。
+item-no-annotations = 这个条目没有注释。
+item-info = 文献信息
+item-abstract = 摘要
+item-notes = 笔记
+item-annotations = 注释
+item-page = 第 %s 页
+item-annotation = 注释
+
+deleted-title = 思源里的笔记已被删除
+deleted-message = %d 条注释的笔记在思源里找不到了，标记已移除。
+deleted-message-one = 这个标记指向的笔记已经不在思源里了。要重新发送这条注释吗？
+deleted-resend = 重新发送
+deleted-ignore = 忽略
+
+queue-title = 暂时连不上思源
+queue-message = 这条注释已加入待发队列，思源恢复后会补发。
+queue-done-title = 待发队列已发送
+queue-done-message = %d 条等待中的注释已经补发到思源。
 
 label-author = 作者
 label-year = 年份

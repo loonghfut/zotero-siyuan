@@ -53,6 +53,15 @@ var ZoteroSiYuanPreferences = {
   ITEM_DOC_PATH_ID: "zotero-prefpane-zoteroSiYuan-item-doc-path",
   ITEM_DOC_ROW_ID: "zotero-prefpane-zoteroSiYuan-item-doc-row",
   SENT_ACTION_ID: "zotero-prefpane-zoteroSiYuan-sent-action",
+  NOTEBOOK_ID: "zotero-prefpane-zoteroSiYuan-notebook",
+  AUTO_SEND_ID: "zotero-prefpane-zoteroSiYuan-auto-send",
+  AUTO_COLORS_ID: "zotero-prefpane-zoteroSiYuan-auto-colors",
+  AUTO_TAGS_ID: "zotero-prefpane-zoteroSiYuan-auto-tags",
+  AUTO_TYPES_ID: "zotero-prefpane-zoteroSiYuan-auto-types",
+  AUTO_ITEM_TYPES_ID: "zotero-prefpane-zoteroSiYuan-auto-item-types",
+  AUTO_QUEUE_RETRY_ID: "zotero-prefpane-zoteroSiYuan-auto-queue-retry",
+  AUTO_QUEUE_CLEAR_ID: "zotero-prefpane-zoteroSiYuan-auto-queue-clear",
+  AUTO_QUEUE_STATUS_ID: "zotero-prefpane-zoteroSiYuan-auto-queue-status",
 
   // The bounds of the compression quality. The value is the JPEG quality
   // in percent: 10 is small and rough, 100 is big and faithful.
@@ -156,6 +165,16 @@ var ZoteroSiYuanPreferences = {
         e.preventDefault();
         this.rescan();
       }
+      else if (target.id === this.AUTO_QUEUE_RETRY_ID) {
+        e.preventDefault();
+        this._retryAutoQueue().catch(function (error) {
+          Zotero.debug("ZoteroSiYuan: the queue retry failed: " + error);
+        });
+      }
+      else if (target.id === this.AUTO_QUEUE_CLEAR_ID) {
+        e.preventDefault();
+        this._clearAutoQueue();
+      }
     });
 
     document.addEventListener("input", (e) => {
@@ -174,6 +193,12 @@ var ZoteroSiYuanPreferences = {
         // Dragging the slider updates the number next to it; the value is
         // stored when the drag is over (`change`), not on every pixel.
         this._syncQuality(target.value);
+      }
+      else if (target.id === this.AUTO_TAGS_ID) {
+        this._saveAutoFilterText("tags", target.value);
+      }
+      else if (target.id === this.AUTO_ITEM_TYPES_ID) {
+        this._saveAutoFilterText("itemTypes", target.value);
       }
     });
 
@@ -208,6 +233,26 @@ var ZoteroSiYuanPreferences = {
       }
       else if (target.id === this.SENT_ACTION_ID) {
         this._saveSentAction(target.value);
+      }
+      else if (target.id === this.NOTEBOOK_ID) {
+        this._saveNotebook(target.value);
+      }
+      else if (target.id === this.AUTO_SEND_ID) {
+        this._saveAutoSend(target.checked);
+      }
+      else if (target.getAttribute("data-auto-color") !== null) {
+        this._toggleAutoFilter(
+          "color",
+          target.getAttribute("data-auto-color"),
+          target.checked,
+        );
+      }
+      else if (target.getAttribute("data-auto-type") !== null) {
+        this._toggleAutoFilter(
+          "type",
+          target.getAttribute("data-auto-type"),
+          target.checked,
+        );
       }
     });
     // Remember where the caret was, so a variable can be inserted there even
@@ -326,6 +371,11 @@ var ZoteroSiYuanPreferences = {
     this._renderConditionalVariables();
     this._restoreImageSettings();
     this._restoreDestinationSettings();
+    // The notebook dropdown and the automatic-send settings are filled in
+    // the background: listing the notebooks costs a SiYuan process, and the
+    // pane should appear at once even when SiYuan is not running.
+    this._loadNotebooks();
+    this._restoreAutoSendSettings();
     this._showProblems(help.template);
     this._refreshPreview();
   },

@@ -453,6 +453,9 @@ Object.assign(ZoteroSiYuanPreferences, {
           ")";
       }
       this._setResult(text, false);
+      // The connection works, so the notebooks are known now — a dropdown
+      // that was empty while SiYuan was not running fills itself in.
+      this._loadNotebooks();
     }
     catch (e) {
       // The report the message came from is already on disk (the plugin

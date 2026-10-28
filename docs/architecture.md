@@ -29,8 +29,9 @@ Reader 事件处理器 `bind(this)`——Zotero 派发事件时 `this` 不是插
 ```js
 Object.assign(
   ZoteroSiYuanAddon.prototype,
-  content, diagnosticsApi, lookup, preferencesApi,
-  readerMarks, readerUi, send, transport,
+  content, destination, diagnosticsApi, itemMenu, itemSend, lookup,
+  preferencesApi, readerMarks, readerUi, send, sendBatch, sentCache,
+  autoSend, transport,
 );
 ```
 
@@ -43,11 +44,23 @@ Object.assign(
 | 做 | 为什么 |
 |---|---|
 | `initLocale()` 选语言包 | 按钮文字、toast 文案都靠它 |
-| 注册偏好面板（6 个脚本） | 面板是一个对象拆在 6 个文件里，顺序即加载顺序 |
+| `_loadSentCache()` | 思源没开时侧栏仍然能显示 ↗（见 5.1 节） |
+| `_registerAutoSend()` | 监听新建注释；自动发送关着时 `notify` 直接返回，不做事 |
+| 注册偏好面板（7 个脚本） | 面板是一个对象拆在 7 个文件里，顺序即加载顺序 |
 | 注册 `renderSidebarAnnotationHeader` | 按钮注入的唯一入口 |
 | 注册 `createAnnotationContextMenu` | 批量发送的入口 |
 | `_startSidebarWatcher()` | 补上"插件醒来前就已经画好的侧栏" |
+| `installItemMenus()` | 补上"插件醒来前就已经开着的窗口"——见下一段 |
 | 可选自检 / 可选协议静默 | 都由偏好开关控制，默认关 |
+
+`onStartup` 里还按 `autoSend` 决定要不要在 8 秒后跑一轮待发队列。
+
+条目列表右键菜单在 `onMainWindowLoad({ window })` 里装、`onMainWindowUnload` / `onShutdown`
+里拆。但 Zotero 只在窗口**打开**时调 `onMainWindowLoad`（`xpcom/plugins.js` 的
+`onOpenWindow`），而插件是在 `Plugins.init()` 里启动的——**在 Zotero 运行中安装或重新启用
+插件时，已经开着的那个主窗口永远收不到这个回调**。所以 `onStartup` 末尾还会用
+`Zotero.getMainWindows()` 把菜单装进现有窗口；窗口还没加载完（没有 `#zotero-itemmenu`）
+就等它的 `load`。两条路都是幂等的（按 `MENU_ID` 查重）。
 
 **不做的两件事**都是有意的：
 
@@ -188,12 +201,54 @@ appendPicture(text, image)    图片 Markdown 插到正文        ← _buildCont
    笔记的块；每组的块 id 和 Markdown 都记进索引；
 6. 需要「替换上次」的，在新写入成功之后再删旧块，旧的 ↗ 标记先摘掉。
 
-失败不是只给个数字：气泡里列出前几条的 key 和原因，并提供"重试失败的那几条"。整个批量
+失败不是只给个数字：气泡里列出前几条的 key 和原因，并提供"重试失败的那几条"和"全部重试"
+（后者用 `allKeys` 把整批再发一遍，已写入的按 `sentAction` 跳过）。整个批量
 （包括进度气泡本身）在 `try/finally` 里，所以阅读器被关掉、气泡画不出来时，`_sending`
 仍然会释放——否则之后每次发送都只会得到"正在发送"。
 
 一张图片只在建它那条笔记时落盘；整批写失败（且不是 `writeState: "unknown"`）时，
 `_batchPictures` 里所有图片一起收回，而不是只收最后一张。
+
+### 自动发送与待发队列
+
+```
+新建注释 → Notifier("item", "add") → _autoSendLater(1.2s)
+            ├─ _maybeAutoSend：isAnnotation？过滤器？索引里已有？_sending 忙？
+            ├─ _sendAnnotation(..., { auto: true })
+            └─ 失败分类：
+                 writeState=unknown → 只记日志（可能已写，重发会写两条）
+                 error.permanent    → 只记日志（目标文档不存在等，重发没用）
+                 其它               → _queueFailed → pendingQueue 偏好
+```
+
+- **默认关闭**：`autoSend = "0"`；关闭时 notifier 仍然注册，但 `notify` 第一行就返回，
+  队列重试也暂停（`_scheduleQueueRetry` 直接返回）。
+- **过滤是"与"**（`modules/auto-filter.js`）：颜色、标签、注释类型、条目分类四个维度，
+  每个维度为空 = 这一项不限；全部为空才会发所有新注释。条目分类取的是**文献条目**——
+  注释的父项是 PDF 附件，所以 `_annotationItemType` 往上走两级。
+- **待发队列**（`modules/pending-queue.js`，纯函数）：`[{ key, attempts, at }]`，
+  最多 200 条；`failPending` 只加尝试次数，退避从 60 秒翻倍到 30 分钟（上限）。
+  触发点有三个：启动 8 秒后、任意一次发送成功之后（`_retryPendingQueueSoon`）、面板按钮。
+- 队列只存 **key**，重试时重新渲染：注释还在 Zotero 里，拿旧 Markdown 重发反而会写进
+  已经变了的内容。
+
+### 条目级发送
+
+`item-menu.js` 在主窗口的 `#zotero-itemmenu` 里追加一个 XUL `<menu>`（`popupshowing`
+时按"有没有选中普通条目"决定隐藏）。五个入口分别在 `item-send.js`：
+
+| 方法 | 内容 |
+|---|---|
+| `_sendItemInfo` | `itemInfoMarkdown(vars)` |
+| `_sendItemAbstract` | `abstractMarkdown(vars)` |
+| `_sendItemNotes` | 子笔记 HTML → Markdown（`noteHtmlToMarkdown`） |
+| `_sendItemAnnotations` | 汇总各 PDF 的注释 key，交给 `_sendMany`（和阅读器批量同一条路） |
+| `_createItemNoteDocument` | 固定走 `_resolveItemDocument`，把信息/摘要/笔记写进这篇文献的文档 |
+
+`_sendItemMarkdown` 按 `destination` 决定写哪里：`item`（或 `itemDocument: true`）用
+`_resolveItemDocument`，`document` 不需要笔记本，其余用 `_resolveDestination`。
+条目级写入不经过 `_sendAnnotation`，所以不参与"已发送"检查、不建立注释索引——
+它送的是整条文献，不是某条注释。
 
 ---
 
@@ -254,6 +309,33 @@ appendPicture(text, image)    图片 Markdown 插到正文        ← _buildCont
   否则单独拖进文库的 PDF 会写成一条没有标题、也没有回链的笔记，重启后永远找不回来。
 - **回链**：`siyuan://blocks/<id>`。优先自己拉起思源（`siyuan-launcher.js`），
   失败再交给系统协议处理器。
+
+### 5.1 本地副本，和"块被删了"
+
+索引在内存里，读它需要 SiYuan 能扫。思源没启动时侧栏会把每条注释都当成没发过，
+所以插件在 Zotero 偏好 `sentCache` 里留一份 `{ key, entries:[{annotationKey, blockID,
+documentID, at}] }`：
+
+```
+启动 _loadSentCache()
+   ├─ 缓存里的 workspace 和当前设置不同 → 整份丢弃
+   ├─ _index.seed(entries)              先让 ↗ 出现，此时还没扫过思源
+   └─ 第一次真正扫描 → SiYuanIndex.refresh() 发出 "snapshot"
+        ├─ 仍存在的条目保留原来的 at（淘汰按最旧）
+        ├─ 扫描结果替换缓存（思源是唯一真相，不合并）
+        └─ before 里有、found 里没有 → change.removed → _notifyDeletedNotes
+```
+
+点击 ↗ 时（`_openSentLink`）再确认一次块还在：
+
+| `_blockExists` | 结果 |
+|---|---|
+| `true` | 正常打开思源 |
+| `false` | `_removeSentMarker` + `_index.remove` + 气泡「原笔记已删除，重新发送？」 |
+| `null`（两个通道都不通） | **当作不知道**，照旧打开——不能因为连不上就擦掉标记 |
+
+`_notifyDeletedNotes` 用一个 Set 去重，一次气泡里可以重发多条；重发走
+`_send(annotation, reader, ..., { alreadySent: "send" })`，绕过"已经发过"的提问。
 
 ---
 
@@ -351,7 +433,7 @@ renderSidebarAnnotationHeader 事件 → 真按钮 → 真 click() → _send →
 
 ---
 
-## 10. 设置页：一个对象，六个脚本
+## 10. 设置页：一个对象，七个脚本
 
 Zotero 把 `scripts` 数组里的文件**按顺序加载进同一个面板作用域**：
 
@@ -361,10 +443,15 @@ Zotero 把 `scripts` 数组里的文件**按顺序加载进同一个面板作用
 | `preferences-template.js` | 模板编辑器、预设、我的模板 |
 | `preferences-variables.js` | 变量列表、筛选、条件变量选择 |
 | `preferences-pictures.js` | 图片压缩设置、框选检查 |
+| `preferences-sending.js` | 笔记本下拉框、自动发送过滤条件、待发队列 |
 | `preferences-actions.js` | 测试连接、重扫索引、自检、预览、模板用途与目标位置 |
 | `preferences-boot.js` | **最后**加载，调用 `init()` |
 
 顺序错了面板就是空的，`tools/validate/00-layout.mjs` 会核对这份顺序。
+
+`preferences-sending.js` 的笔记本下拉框在 `onPaneReady` 里异步加载（看板先出现，
+列笔记本要 spawn 一次 CLI），「测试连接」成功后再刷新一次。列不出来时保留当前选择，
+并标一个「在思源里没找到」的选项——**不因为列不出来就清空设置**。
 
 ---
 
@@ -404,6 +491,13 @@ Zotero 把 `scripts` 数组里的文件**按顺序加载进同一个面板作用
     原来记一次就永远跳过，于是思源里新增/删除/同步进来的笔记永远不会反映到侧栏。
 18. **索引也能走 HTTP**（`_indexTransport` + `POST /api/query/sql`）。CLI 起不来但内核能
     连上时，发送是好的，可重启后所有标记消失——只因为扫描只会用 CLI。
+19. **自动发送默认关闭，且过滤器是"与"关系**。任何一个维度留空 = 不限，别把空列表
+    解释成"什么都不发"；也别把 `autoSend` 的默认值改成 `"1"`。
+20. **监听器和菜单必须成对拆掉**。Notifier observer、`_autoSendTimers`、`_queueTimer`、
+    条目菜单、`sentCache` 的定时写入，都在 `onShutdown` / `onMainWindowUnload` 里收尾；
+    `_shutDown` 之后启动的回调要自己返回。
+21. **连不上 ≠ 被删除**。`_blockExists` 的三态（true / false / null）不能在调用方压成
+    布尔值，否则思源关着时点一次 ↗ 就会把标记全擦掉。
 
 ---
 

@@ -145,7 +145,13 @@ export async function clearLegacyTags(annotation) {
  * The index of the annotations that have been sent.
  */
 export class SiYuanIndex {
-	constructor() {
+	/**
+	 * @param {Object} [options]
+	 * @param {Function} [options.onChange] - told about every change, so the
+	 *   local cache can follow the index without the index knowing about it
+	 */
+	constructor({ onChange = null } = {}) {
+		this._onChange = typeof onChange === "function" ? onChange : null;
 		// annotation key → SiYuan block id
 		this.blocks = new Map();
 		// What is known about a sent note beyond its first block: the
@@ -176,6 +182,53 @@ export class SiYuanIndex {
 
 	get size() {
 		return this.blocks.size;
+	}
+
+	/**
+	 * Tell the listener what changed.
+	 *
+	 * The index is also the place the local cache learns from, but the
+	 * cache is the caller's concern — a change is described here and the
+	 * listener decides whether to write a preference.
+	 *
+	 * @param {Object} change
+	 */
+	_emit(change) {
+		if (!this._onChange) {
+			return;
+		}
+		try {
+			this._onChange(change);
+		}
+		catch (e) {
+			Zotero.debug(`ZoteroSiYuan: the index listener failed: ${e}`);
+		}
+	}
+
+	/**
+	 * Fill the index from the local cache.
+	 *
+	 * Used before the workspace is reachable: without it, a reader that is
+	 * opened while SiYuan is closed shows every annotation as unsent. A
+	 * later scan replaces these entries — the cache is not authoritative.
+	 *
+	 * @param {Array<{annotationKey: String, blockID: String, documentID: String}>} entries
+	 */
+	seed(entries) {
+		for (const entry of Array.isArray(entries) ? entries : []) {
+			const key = String((entry && entry.annotationKey) || "");
+			const blockID = String((entry && entry.blockID) || "");
+			if (!key || !blockID || this.blocks.has(key)) {
+				continue;
+			}
+			this.blocks.set(key, blockID);
+			this.details.set(key, {
+				blockID,
+				documentID: String(entry.documentID || ""),
+				blocks: [],
+				markdown: "",
+			});
+		}
 	}
 
 	/**
@@ -230,6 +283,12 @@ export class SiYuanIndex {
 					: [],
 				markdown: String(details.markdown || ""),
 			});
+			this._emit({
+				type: "add",
+				key,
+				blockID: String(blockID),
+				documentID: String(details.documentID || ""),
+			});
 		}
 	}
 
@@ -245,6 +304,7 @@ export class SiYuanIndex {
 		this.blocks.delete(key);
 		this.details.delete(key);
 		this._revisions.delete(key);
+		this._emit({ type: "remove", key });
 	}
 
 	/**
@@ -384,6 +444,12 @@ export class SiYuanIndex {
 				blocks: [],
 				markdown: row.markdown || "",
 			});
+			this._emit({
+				type: "add",
+				key,
+				blockID: row.id,
+				documentID: row.root_id || "",
+			});
 		}
 		this.perAttachment.set(String(attachmentKey), found);
 		return found;
@@ -399,6 +465,11 @@ export class SiYuanIndex {
 		// Everything that is added from now on is newer than the query
 		// below can be, so it has to survive it.
 		const revision = this._revision;
+		// What was known before the scan — including entries seeded from
+		// the local cache. Anything here that the workspace does not have
+		// any more was deleted in SiYuan, and the caller has to hear about
+		// it so the marker can go away.
+		const before = new Map(this.blocks);
 		const rows = await cli.runJSON([
 			"sql",
 			// The link lives in the *markdown* column: the plain-text
@@ -465,6 +536,21 @@ export class SiYuanIndex {
 		}
 		this.blocksScanned = Array.isArray(rows) ? rows.length : 0;
 		this.scannedAt = new Date().toISOString();
+		// Keys the cache knew and the workspace no longer has. A note the
+		// user deleted in SiYuan is not "unsent" — it is gone, and the
+		// reader should stop pointing at it.
+		const removed = [];
+		for (const [key, blockID] of before) {
+			if (!found.has(key)) {
+				removed.push({ key, blockID });
+			}
+		}
+		this._emit({
+			type: "snapshot",
+			blocks: this.blocks,
+			details: this.details,
+			removed,
+		});
 		return this.blocks.size;
 	}
 }

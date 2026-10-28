@@ -44,13 +44,27 @@ export default {
    * @returns {Promise<Object>} the template variables
    */
   async _buildVars(annotation, reader, hooks = null, known = {}) {
+    // Automatic sends, retries and item-level sends have no reader tab.
+    // The annotation's parent attachment is all the rendering needs, so a
+    // reader-shaped object is made from the item — the rest of the path
+    // does not have to know where the send came from.
+    let activeReader = reader;
+    if (!activeReader || !activeReader.itemID) {
+      activeReader = known.attachment
+        ? null
+        : await this._readerForAnnotation(annotation);
+    }
     // The attachment is needed twice — as the PDF the picture belongs to and
     // as the way to the item that holds the metadata — so it is looked up
     // once and passed on.
     const attachment = Object.prototype.hasOwnProperty.call(known, "attachment")
       ? known.attachment
-      : await this._getAttachment(reader);
-    const parentItem = await this._getParentItem(reader, hooks, attachment);
+      : await this._getAttachment(activeReader);
+    const parentItem = await this._getParentItem(
+      activeReader,
+      hooks,
+      attachment,
+    );
     const annotationKey = known.annotationKey !== undefined
       ? known.annotationKey
       : await this._resolveAnnotationKey(annotation);

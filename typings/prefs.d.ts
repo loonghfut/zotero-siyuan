@@ -15,6 +15,13 @@ declare namespace _ZoteroTypes {
       "itemDocName": string;
       "itemDocPath": string;
       "sentAction": string;
+      "autoSend": string;
+      "autoSendColors": string;
+      "autoSendTags": string;
+      "autoSendTypes": string;
+      "autoSendItemTypes": string;
+      "pendingQueue": string;
+      "sentCache": string;
       "template": string;
       "itemTemplate": string;
       "templates": string;

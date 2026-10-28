@@ -29,6 +29,7 @@ export default {
     return {
       id: item.key,
       type: item.annotationType || "highlight",
+      color: item.annotationColor || "",
       text: item.annotationText || "",
       comment: item.annotationComment || "",
       pageLabel: item.annotationPageLabel || "",
@@ -81,6 +82,25 @@ export default {
     catch (e) {
       return null;
     }
+  },
+
+  /**
+   * A reader-shaped object for an annotation that has no reader.
+   *
+   * Automatic sends, retries and item-level sends work from the annotation
+   * item alone. `_buildVars` only needs the attachment, and an annotation's
+   * parent *is* its attachment — so a small object is enough to let the
+   * whole rendering path run unchanged.
+   *
+   * @param {Object} annotation
+   * @returns {Promise<{itemID: Number}|null>}
+   */
+  async _readerForAnnotation(annotation) {
+    const item = await this._getAnnotationItem(annotation);
+    if (!item || !item.parentItemID) {
+      return null;
+    }
+    return { itemID: item.parentItemID };
   },
 
   /**
@@ -154,16 +174,14 @@ export default {
    */
   async _getParentItem(reader, hooks = null, attachment = null) {
     try {
-      const itemID = reader && reader.itemID;
-      if (!itemID) {
-        return null;
-      }
       if (hooks && hooks.stage) {
         hooks.stage("reading the parent item");
       }
       // The attachment is the same object the caller already asked for —
       // loading it a second time would be a second trip for one answer.
-      const pdf = attachment || (await this._getAttachment(reader));
+      // It is also enough on its own: a reader is only needed to find it.
+      const pdf = attachment ||
+        ((reader && reader.itemID) ? await this._getAttachment(reader) : null);
       if (!pdf || !pdf.parentItemID) {
         return null;
       }

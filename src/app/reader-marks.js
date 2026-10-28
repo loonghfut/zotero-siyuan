@@ -2,14 +2,13 @@
  * Zotero → SiYuan — the "sent" markers and the links back to SiYuan.
  */
 
-import {
-	SENT_ICON_STYLE,
-	SENT_LINK_STYLE,
-} from "./constants.js";
+import { SENT_ICON_STYLE, SENT_LINK_STYLE } from "./constants.js";
 import { createSiyuanIcon } from "../modules/icons.js";
 import { siyuanBlockLink } from "../modules/metadata.js";
+import { showToast } from "../modules/toast.js";
 import { INDEX_TTL_MS } from "../modules/siyuan-index.js";
 import { launchExternally } from "../modules/siyuan-launcher.js";
+import { getString } from "../utils/locale.js";
 import { getPref } from "../utils/prefs.js";
 
 export default {
@@ -183,8 +182,9 @@ export default {
       }
       e.preventDefault();
       e.stopPropagation();
-      this._openInSiYuan(link.getAttribute("data-block-id"));
-
+      this._openSentLink(link).catch((error) => {
+        Zotero.logError(`ZoteroSiYuan: could not follow the marker: ${error}`);
+      });
     };
     doc.addEventListener("click", handler);
     // Remembered with its document, so `onShutdown` can take it off. A
@@ -254,6 +254,97 @@ export default {
       added++;
     }
     return added;
+  },
+
+  /**
+   * Follow a marker, checking first that its block is still there.
+   *
+   * The block can be deleted in SiYuan at any time. Opening the desktop app
+   * on a dead block is a click that appears to do nothing — so the block is
+   * checked, and a missing one turns into an offer to send the annotation
+   * again. An unreachable SiYuan is not a deleted block: the link is opened
+   * as before.
+   *
+   * @param {Object} link - the marker that was clicked
+   */
+  async _openSentLink(link) {
+    if (!link) {
+      return;
+    }
+    const blockID = link.getAttribute("data-block-id") || "";
+    const key = link.getAttribute("data-zsi-for") || "";
+    const exists = await this._blockExists(blockID);
+    if (exists !== false) {
+      this._openInSiYuan(blockID);
+      return;
+    }
+    // The marker is not updated by the reader any more: its block is gone.
+    const doc = link.ownerDocument || null;
+    this._removeSentMarker(doc, key);
+    if (key) {
+      this._index.remove(key);
+    }
+    await this._offerResend(key, doc);
+  },
+
+  /**
+   * Offer to send an annotation whose SiYuan note was deleted.
+   *
+   * @param {String} key - the annotation key
+   * @param {Object} [doc] - where the marker was
+   */
+  async _offerResend(key, doc = null) {
+    if (!key) {
+      return;
+    }
+    let annotation = null;
+    try {
+      const item = await this._getAnnotationItem({ id: key });
+      if (item) {
+        annotation = await this._annotationFromItem(item);
+      }
+    }
+    catch (e) {
+      annotation = null;
+    }
+    try {
+      showToast({
+        doc,
+        title: getString(
+          "zoteroSiYuan-deleted-title",
+          "A sent note was deleted in SiYuan",
+        ),
+        message: getString(
+          "zoteroSiYuan-deleted-message-one",
+          "The note this marker pointed at is gone. Send the annotation again?",
+        ),
+        timeout: 15000,
+        actions: annotation
+          ? [
+            {
+              label: getString(
+                "zoteroSiYuan-deleted-resend",
+                "Send them again",
+              ),
+              primary: true,
+              onClick: async () => {
+                const reader = await this._readerForAnnotation(annotation);
+                await this._send(annotation, reader, null, {
+                  alreadySent: "send",
+                });
+                if (doc) {
+                  this._updateRenderedMarkers(doc);
+                }
+              },
+            },
+            { label: getString("zoteroSiYuan-deleted-ignore", "Ignore") },
+          ]
+          : [{ label: getString("zoteroSiYuan-deleted-ignore", "Ignore") }],
+      });
+    }
+    catch (e) {
+      Zotero.debug(`ZoteroSiYuan: could not offer to resend: ${e}`);
+    }
   },
 
   /**

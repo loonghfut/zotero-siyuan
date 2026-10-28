@@ -108,6 +108,7 @@ export default {
     sent = 0,
     skipped = 0,
     failedItems = [],
+    allKeys = [],
     lastBlock = "",
   } = {}) {
     const done = {
@@ -137,18 +138,29 @@ export default {
           "Not everything was sent",
         ),
         message: this._batchFailureMessage(failedItems),
-        link: "",
-        linkLabel: getString(
-          "zoteroSiYuan-toast-batch-retry",
-          "Retry the failed ones",
-        ),
-        onLink: () =>
-          this._sendMany(
-            failedItems.map((entry) => entry.key),
-            reader,
-            target,
-          ),
         timeout: 0,
+        actions: [
+          {
+            label: getString(
+              "zoteroSiYuan-toast-batch-retry",
+              "Retry the failed ones",
+            ),
+            primary: true,
+            onClick: () =>
+              this._sendMany(
+                failedItems.map((entry) => entry.key),
+                reader,
+                target,
+              ),
+          },
+          {
+            label: getString(
+              "zoteroSiYuan-toast-batch-retry-all",
+              "Retry all",
+            ),
+            onClick: () => this._sendMany(allKeys, reader, target),
+          },
+        ],
       });
     }
     catch (e) {
@@ -198,6 +210,7 @@ export default {
     let notebook = null;
     const built = [];
     const failedItems = [];
+    const jobs = [];
     try {
       this._setReaderBusy(target, true);
       // No timeout: the bubble goes away when the batch says it is done.
@@ -220,7 +233,6 @@ export default {
 
       const items = this._prefetchAnnotationItems(ids);
       const action = this._sentAction();
-      const jobs = [];
       for (const id of ids) {
         try {
           const item = await items.get(id);
@@ -270,7 +282,8 @@ export default {
       }
       if (!jobs.length) {
         this._batchDone({
-          target, progress, reader, sent, skipped, failedItems, lastBlock,
+          target, progress, reader, sent, skipped, failedItems, allKeys: ids,
+          lastBlock,
         });
         return;
       }
@@ -316,7 +329,8 @@ export default {
       }
       if (!built.length) {
         this._batchDone({
-          target, progress, reader, sent, skipped, failedItems, lastBlock,
+          target, progress, reader, sent, skipped, failedItems, allKeys: ids,
+          lastBlock,
         });
         return;
       }
@@ -349,7 +363,8 @@ export default {
         }
         Zotero.logError(`ZoteroSiYuan: the batch write failed: ${e}`);
         this._batchDone({
-          target, progress, reader, sent, skipped, failedItems, lastBlock,
+          target, progress, reader, sent, skipped, failedItems, allKeys: ids,
+          lastBlock,
         });
         return;
       }
@@ -394,7 +409,8 @@ export default {
         this._updateRenderedMarkers(target);
       }
       this._batchDone({
-        target, progress, reader, sent, skipped, failedItems, lastBlock,
+        target, progress, reader, sent, skipped, failedItems, allKeys: ids,
+        lastBlock,
       });
     }
     catch (e) {
@@ -403,13 +419,21 @@ export default {
       const message = String((e && e.message) || e).split("\n")[0];
       if (built.length) {
         await this._dropPictures();
-        for (const job of built) {
+      }
+      // A destination that cannot be resolved fails before anything is
+      // built — the annotations themselves are fine, and saying so is what
+      // makes the "retry" button meaningful.
+      const reported = new Set(failedItems.map((entry) => entry.key));
+      for (const job of jobs) {
+        if (!reported.has(job.key)) {
+          reported.add(job.key);
           failedItems.push({ key: job.key, message });
         }
       }
       Zotero.logError(`ZoteroSiYuan: the batch could not be sent: ${e}`);
       this._batchDone({
-        target, progress, reader, sent, skipped, failedItems, lastBlock,
+        target, progress, reader, sent, skipped, failedItems, allKeys: ids,
+        lastBlock,
       });
     }
     finally {

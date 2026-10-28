@@ -25,6 +25,7 @@ import "./validate/08b-picture-file.mjs"; // … and what lands in the workspace
 import "./validate/09-regression.mjs"; // Guards against the bugs that came back once already
 import "./validate/10-startup.mjs"; // Startup and the self test
 import "./validate/11-xpi.mjs"; // The packaged XPI
+import "./validate/12-sending.mjs"; // Automatic sending, the queue, the local cache
 import { report } from "./validate/harness.mjs";
 
 report();

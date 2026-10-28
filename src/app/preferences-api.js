@@ -83,6 +83,33 @@ export default {
   },
 
   /**
+   * The notebooks SiYuan has, for the settings dropdown.
+   *
+   * The pane cannot spawn a process itself, so it asks the plugin. HTTP is
+   * the fallback for a machine where the CLI cannot run but the kernel is
+   * reachable — the same two transports the send path has.
+   *
+   * @returns {Promise<Array<{id: String, name: String}>>}
+   */
+  async listNotebooks() {
+    try {
+      return await this.getCLI().listNotebooks();
+    }
+    catch (cliError) {
+      try {
+        const http = await this._httpClient();
+        return await http.listNotebooks();
+      }
+      catch (httpError) {
+        throw new Error(
+          `the siyuan CLI failed: ${cliError.message} — ` +
+            `the SiYuan HTTP API failed too: ${httpError.message}`,
+        );
+      }
+    }
+  },
+
+  /**
    * Insert a token into the template at the caret.
    *
    * The preferences pane cannot use the plugin's modules directly — it runs

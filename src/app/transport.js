@@ -303,6 +303,43 @@ export default {
   },
 
   /**
+   * Does a block still exist?
+   *
+   * A marker that points at a block the user deleted in SiYuan leads
+   * nowhere. The answer decides whether the marker is still worth showing —
+   * so a check that cannot reach SiYuan says "unknown" instead of "gone".
+   *
+   * HTTP is tried first: a marker click should not wait for a process to
+   * start when the kernel can answer in milliseconds. The CLI is the
+   * fallback for a machine without an API token.
+   *
+   * @param {String} blockID
+   * @returns {Promise<Boolean|null>} true, false, or null when unknown
+   */
+  async _blockExists(blockID) {
+    if (!isBlockID(blockID)) {
+      return false;
+    }
+    try {
+      const http = await this._httpClient();
+      const rows = await http.sql(
+        `SELECT id FROM blocks WHERE id = '${blockID}'`,
+      );
+      return Array.isArray(rows) ? rows.length > 0 : null;
+    }
+    catch (e) {
+      // No HTTP client — try the CLI below.
+    }
+    try {
+      const rows = await this.getCLI().blockRows([blockID]);
+      return rows.length > 0;
+    }
+    catch (e) {
+      return null;
+    }
+  },
+
+  /**
    * Delete blocks, whichever transport can.
    *
    * "Replace" uses this to take the previous note back before writing the

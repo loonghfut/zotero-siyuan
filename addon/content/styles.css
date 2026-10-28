@@ -38,6 +38,52 @@
   gap: 8px;
 }
 
+/* Colour and annotation-type checkboxes sit in a wrapping row. */
+.zsi-checks {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 14px;
+}
+
+.zsi-checks label {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  white-space: nowrap;
+}
+
+/* A colour filter is a chip: checkbox, a square of the colour itself, name. */
+.zsi-auto-choice {
+  cursor: pointer;
+  padding: 2px 6px 2px 2px;
+  border-radius: 5px;
+}
+
+.zsi-auto-choice:hover {
+  background: rgba(128, 128, 128, 0.14);
+}
+
+.zsi-swatch {
+  display: inline-block;
+  width: 12px;
+  height: 12px;
+  flex: 0 0 auto;
+  border-radius: 3px;
+  border: 1px solid rgba(0, 0, 0, 0.25);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.35);
+}
+
+/* Zotero's own annotation colours, so a chip looks like the highlight. */
+.zsi-swatch-yellow { background-color: #ffd400; }
+.zsi-swatch-red { background-color: #ff6666; }
+.zsi-swatch-green { background-color: #5fb236; }
+.zsi-swatch-blue { background-color: #2ea8e5; }
+.zsi-swatch-purple { background-color: #a28ae5; }
+.zsi-swatch-magenta { background-color: #e56eee; }
+.zsi-swatch-orange { background-color: #f19837; }
+.zsi-swatch-gray { background-color: #aaaaaa; }
+
 /* The quality row carries a slider and a number. */
 .zsi-field > .zsi-range {
   min-width: 10em;

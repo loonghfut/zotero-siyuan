@@ -39,12 +39,18 @@
         for="zotero-prefpane-zoteroSiYuan-notebook"
         data-l10n-id="pref-notebook"
       ></html:label>
-      <html:input
-        class="zsi-input"
-        type="text"
+      <!--
+        A dropdown instead of a text box: the notebook that is picked has
+        to exist, and "test the connection" already knows how to list them.
+        The empty value means "the first usable one", which is what an
+        untouched install wants.
+      -->
+      <html:select
+        class="zsi-select"
         id="zotero-prefpane-zoteroSiYuan-notebook"
-        preference="notebook"
-      ></html:input>
+      >
+        <html:option value="" data-l10n-id="pref-notebook-auto"></html:option>
+      </html:select>
     </html:div>
 
     <html:div class="zsi-actions">
@@ -175,6 +181,210 @@
     </html:div>
 
     <html:p class="zsi-hint" data-l10n-id="pref-destination-hint"></html:p>
+  </groupbox>
+
+  <groupbox>
+    <label><html:h2 data-l10n-id="pref-auto-title"></html:h2></label>
+
+    <html:div class="zsi-field zsi-field-check">
+      <html:input
+        class="zsi-checkbox"
+        id="zotero-prefpane-zoteroSiYuan-auto-send"
+        type="checkbox"
+      ></html:input>
+      <html:label
+        for="zotero-prefpane-zoteroSiYuan-auto-send"
+        data-l10n-id="pref-auto-send"
+      ></html:label>
+    </html:div>
+
+    <html:p class="zsi-hint" data-l10n-id="pref-auto-hint"></html:p>
+
+    <html:div class="zsi-field">
+      <html:label class="zsi-label" data-l10n-id="pref-auto-colors"></html:label>
+      <!--
+        The colours are written out instead of being built by the pane
+        script: `data-l10n-id` on static markup is translated by Zotero
+        itself, while an element made later would keep whatever text it was
+        born with. The `data-auto-color` value is the Zotero colour.
+      -->
+      <html:div
+        class="zsi-checks"
+        id="zotero-prefpane-zoteroSiYuan-auto-colors"
+      >
+        <html:label class="zsi-inline-check zsi-auto-choice">
+          <html:input
+            class="zsi-checkbox"
+            type="checkbox"
+            data-auto-color="#ffd400"
+          ></html:input>
+          <html:span class="zsi-swatch zsi-swatch-yellow"></html:span>
+          <html:span data-l10n-id="pref-auto-color-yellow"></html:span>
+        </html:label>
+        <html:label class="zsi-inline-check zsi-auto-choice">
+          <html:input
+            class="zsi-checkbox"
+            type="checkbox"
+            data-auto-color="#ff6666"
+          ></html:input>
+          <html:span class="zsi-swatch zsi-swatch-red"></html:span>
+          <html:span data-l10n-id="pref-auto-color-red"></html:span>
+        </html:label>
+        <html:label class="zsi-inline-check zsi-auto-choice">
+          <html:input
+            class="zsi-checkbox"
+            type="checkbox"
+            data-auto-color="#5fb236"
+          ></html:input>
+          <html:span class="zsi-swatch zsi-swatch-green"></html:span>
+          <html:span data-l10n-id="pref-auto-color-green"></html:span>
+        </html:label>
+        <html:label class="zsi-inline-check zsi-auto-choice">
+          <html:input
+            class="zsi-checkbox"
+            type="checkbox"
+            data-auto-color="#2ea8e5"
+          ></html:input>
+          <html:span class="zsi-swatch zsi-swatch-blue"></html:span>
+          <html:span data-l10n-id="pref-auto-color-blue"></html:span>
+        </html:label>
+        <html:label class="zsi-inline-check zsi-auto-choice">
+          <html:input
+            class="zsi-checkbox"
+            type="checkbox"
+            data-auto-color="#a28ae5"
+          ></html:input>
+          <html:span class="zsi-swatch zsi-swatch-purple"></html:span>
+          <html:span data-l10n-id="pref-auto-color-purple"></html:span>
+        </html:label>
+        <html:label class="zsi-inline-check zsi-auto-choice">
+          <html:input
+            class="zsi-checkbox"
+            type="checkbox"
+            data-auto-color="#e56eee"
+          ></html:input>
+          <html:span class="zsi-swatch zsi-swatch-magenta"></html:span>
+          <html:span data-l10n-id="pref-auto-color-magenta"></html:span>
+        </html:label>
+        <html:label class="zsi-inline-check zsi-auto-choice">
+          <html:input
+            class="zsi-checkbox"
+            type="checkbox"
+            data-auto-color="#f19837"
+          ></html:input>
+          <html:span class="zsi-swatch zsi-swatch-orange"></html:span>
+          <html:span data-l10n-id="pref-auto-color-orange"></html:span>
+        </html:label>
+        <html:label class="zsi-inline-check zsi-auto-choice">
+          <html:input
+            class="zsi-checkbox"
+            type="checkbox"
+            data-auto-color="#aaaaaa"
+          ></html:input>
+          <html:span class="zsi-swatch zsi-swatch-gray"></html:span>
+          <html:span data-l10n-id="pref-auto-color-gray"></html:span>
+        </html:label>
+      </html:div>
+    </html:div>
+
+    <html:div class="zsi-field">
+      <html:label
+        class="zsi-label"
+        for="zotero-prefpane-zoteroSiYuan-auto-tags"
+        data-l10n-id="pref-auto-tags"
+      ></html:label>
+      <html:input
+        class="zsi-input"
+        type="text"
+        id="zotero-prefpane-zoteroSiYuan-auto-tags"
+      ></html:input>
+    </html:div>
+
+    <html:div class="zsi-field">
+      <html:label class="zsi-label" data-l10n-id="pref-auto-types"></html:label>
+      <html:div
+        class="zsi-checks"
+        id="zotero-prefpane-zoteroSiYuan-auto-types"
+      >
+        <html:label class="zsi-inline-check zsi-auto-choice">
+          <html:input
+            class="zsi-checkbox"
+            type="checkbox"
+            data-auto-type="highlight"
+          ></html:input>
+          <html:span data-l10n-id="pref-auto-type-highlight"></html:span>
+        </html:label>
+        <html:label class="zsi-inline-check zsi-auto-choice">
+          <html:input
+            class="zsi-checkbox"
+            type="checkbox"
+            data-auto-type="underline"
+          ></html:input>
+          <html:span data-l10n-id="pref-auto-type-underline"></html:span>
+        </html:label>
+        <html:label class="zsi-inline-check zsi-auto-choice">
+          <html:input
+            class="zsi-checkbox"
+            type="checkbox"
+            data-auto-type="note"
+          ></html:input>
+          <html:span data-l10n-id="pref-auto-type-note"></html:span>
+        </html:label>
+        <html:label class="zsi-inline-check zsi-auto-choice">
+          <html:input
+            class="zsi-checkbox"
+            type="checkbox"
+            data-auto-type="text"
+          ></html:input>
+          <html:span data-l10n-id="pref-auto-type-text"></html:span>
+        </html:label>
+        <html:label class="zsi-inline-check zsi-auto-choice">
+          <html:input
+            class="zsi-checkbox"
+            type="checkbox"
+            data-auto-type="image"
+          ></html:input>
+          <html:span data-l10n-id="pref-auto-type-image"></html:span>
+        </html:label>
+      </html:div>
+    </html:div>
+
+    <html:div class="zsi-field">
+      <html:label
+        class="zsi-label"
+        for="zotero-prefpane-zoteroSiYuan-auto-item-types"
+        data-l10n-id="pref-auto-item-types"
+      ></html:label>
+      <html:input
+        class="zsi-input"
+        type="text"
+        id="zotero-prefpane-zoteroSiYuan-auto-item-types"
+      ></html:input>
+    </html:div>
+
+    <html:p class="zsi-hint" data-l10n-id="pref-auto-filter-hint"></html:p>
+
+    <html:div class="zsi-actions">
+      <html:button
+        class="zsi-button"
+        id="zotero-prefpane-zoteroSiYuan-auto-queue-retry"
+        data-l10n-id="pref-auto-queue-retry"
+      ></html:button>
+      <html:button
+        class="zsi-button"
+        id="zotero-prefpane-zoteroSiYuan-auto-queue-clear"
+        data-l10n-id="pref-auto-queue-clear"
+      ></html:button>
+    </html:div>
+
+    <html:p
+      class="zsi-result"
+      id="zotero-prefpane-zoteroSiYuan-auto-queue-status"
+      role="status"
+      aria-live="polite"
+    ></html:p>
+
+    <html:p class="zsi-hint" data-l10n-id="pref-auto-queue-hint"></html:p>
   </groupbox>
 
   <groupbox>

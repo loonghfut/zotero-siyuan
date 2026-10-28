@@ -17,6 +17,7 @@ toast-batch-failed = %d failed
 toast-batch-skipped = %d skipped (already sent)
 toast-batch-failed-title = Not everything was sent
 toast-batch-retry = Retry the failed ones
+toast-batch-retry-all = Retry all
 toast-batch-more = …and %d more
 toast-missing-annotation = the annotation is no longer in the library
 
@@ -31,6 +32,36 @@ target-document-not-found = No document titled “%s” was found.
 item-document-failed = Could not create the SiYuan document for this item: %s
 menu-send-one = Send to SiYuan
 menu-send-many = Send %d annotations to SiYuan
+
+item-menu = Send to SiYuan
+item-menu-info = Send the item details
+item-menu-abstract = Send the abstract
+item-menu-notes = Send the notes
+item-menu-annotations = Send all annotations
+item-menu-document = Create the literature-note document
+
+item-sent-title = Sent to SiYuan
+item-failed-title = Could not send the item to SiYuan
+item-no-abstract = This item has no abstract.
+item-no-notes = This item has no notes.
+item-no-annotations = This item has no annotations.
+item-info = Item details
+item-abstract = Abstract
+item-notes = Notes
+item-annotations = Annotations
+item-page = Page %s
+item-annotation = Annotation
+
+deleted-title = A sent note was deleted in SiYuan
+deleted-message = %d annotation(s) had a note in SiYuan that is no longer there. The marker was removed.
+deleted-message-one = The note this marker pointed at is gone. Send the annotation again?
+deleted-resend = Send them again
+deleted-ignore = Ignore
+
+queue-title = SiYuan is not reachable
+queue-message = The annotation was added to the pending queue and will be sent when SiYuan is back.
+queue-done-title = The queue was sent
+queue-done-message = %d waiting annotation(s) have been sent to SiYuan.
 
 label-author = Author
 label-year = Year

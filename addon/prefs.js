@@ -13,6 +13,22 @@ pref("itemDocPath", "/");
 // What a click on an already-sent annotation does: "ask", "skip", "send"
 // (append another note) or "replace" (delete the old note first).
 pref("sentAction", "ask");
+// Automatic sending of new annotations. Off by default: an annotation
+// appearing in SiYuan without the user asking for it is noise unless they
+// asked for it. The filters below are comma-separated; empty = no filter.
+pref("autoSend", "0");
+pref("autoSendColors", "");
+pref("autoSendTags", "");
+pref("autoSendTypes", "");
+pref("autoSendItemTypes", "");
+// Annotations whose automatic send failed because SiYuan was unreachable.
+// A JSON array of { key, attempts, at }; retried on startup and when a
+// later send proves the connection is back.
+pref("pendingQueue", "[]");
+// The last known annotation key → block id mapping, so the "sent" markers
+// survive a restart while SiYuan is not running. SiYuan stays the source of
+// truth; this is only a cache.
+pref("sentCache", "{}");
 // The send template. Empty = use the built-in default.
 pref("template", "");
 // The template for "one document per item". Empty = use the template above:

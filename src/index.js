@@ -35,12 +35,16 @@ import {
 import content from "./app/content.js";
 import destination from "./app/destination.js";
 import diagnosticsApi from "./app/diagnostics-api.js";
+import itemMenu from "./app/item-menu.js";
+import itemSend from "./app/item-send.js";
 import lookup from "./app/lookup.js";
 import preferencesApi from "./app/preferences-api.js";
 import readerMarks from "./app/reader-marks.js";
 import readerUi from "./app/reader-ui.js";
 import send from "./app/send.js";
 import sendBatch from "./app/send-batch.js";
+import sentCache from "./app/sent-cache.js";
+import autoSend from "./app/auto-send.js";
 import transport from "./app/transport.js";
 
 class ZoteroSiYuanAddon {
@@ -57,7 +61,24 @@ class ZoteroSiYuanAddon {
     this._sending = false;
     // Which SiYuan block an annotation went to. The mapping lives in the
     // workspace, not in the Zotero library — see `modules/siyuan-index.js`.
-    this._index = new SiYuanIndex();
+    // The listener keeps a small local copy, so the markers survive a start
+    // while SiYuan is not running.
+    this._index = new SiYuanIndex({
+      onChange: (change) => this._indexChanged(change),
+    });
+    this._sentCache = new Map();
+    this._sentCacheTimer = null;
+    this._deletedNotified = new Set();
+    // Automatic sends: the notifier that watches new annotations, the
+    // queue of the ones SiYuan could not take, and its retry timer.
+    this._autoSendObserver = null;
+    this._autoSendObserverID = null;
+    this._autoSendTimers = new Set();
+    this._pendingQueue = null;
+    this._queueTimer = null;
+    this._queueRunning = false;
+    // The item-list menus this plugin added, by window.
+    this._itemMenus = null;
     // Reader documents that already have the delegated click listener, and
     // the attachments whose blocks are in the index. The listeners are kept
     // with their document, so they can be taken off at shutdown.
@@ -148,6 +169,19 @@ class ZoteroSiYuanAddon {
     await initLocale();
     this._shutDown = false;
 
+    // The local copy of the markers is loaded before anything can draw a
+    // sidebar: with SiYuan not running, a reader would otherwise show every
+    // annotation as unsent until the first successful scan.
+    this._loadSentCache();
+
+    // Automatic sending is off by default; registering the notifier costs
+    // nothing until it is turned on.
+    this._registerAutoSend();
+    if (prefFlag("autoSend")) {
+      this._pendingQueueEntries();
+      this._scheduleQueueRetry(8000);
+    }
+
     // A rejected registration would otherwise be an unhandled rejection —
     // and the pane would simply be missing, with nothing in the log.
     //
@@ -163,6 +197,7 @@ class ZoteroSiYuanAddon {
           "content/preferences-template.js",
           "content/preferences-variables.js",
           "content/preferences-pictures.js",
+          "content/preferences-sending.js",
           "content/preferences-actions.js",
           "content/preferences-boot.js",
         ],
@@ -226,6 +261,12 @@ class ZoteroSiYuanAddon {
       });
     }
 
+    // A window that is already open has already had its
+    // `onMainWindowLoad` — when the plugin was installed or re-enabled while
+    // Zotero was running, that call never comes. The item menu is put into
+    // those windows here.
+    this.installItemMenus();
+
     // A reader that was restored when Zotero started may have drawn its
     // sidebar before this plugin was awake — look after those.
     this._startSidebarWatcher();
@@ -260,6 +301,22 @@ class ZoteroSiYuanAddon {
     if (this._watchTimer) {
       clearTimeout(this._watchTimer);
       this._watchTimer = null;
+    }
+    this._unregisterAutoSend();
+    if (this._sentCacheTimer) {
+      clearTimeout(this._sentCacheTimer);
+      this._sentCacheTimer = null;
+    }
+    this._flushSentCache();
+    // A window may outlive the plugin on a hot reload; leave no menu that
+    // belongs to code that is no longer there.
+    try {
+      for (const win of Zotero.getMainWindows() || []) {
+        this._removeItemMenu(win);
+      }
+    }
+    catch (e) {
+      // No main window to clean up.
     }
 
     // The delegated listeners live in reader documents, which outlive the
@@ -311,14 +368,6 @@ class ZoteroSiYuanAddon {
     this._sampleCache = null;
   }
 
-  async onMainWindowLoad() {
-    // The plugin does not touch the main window's DOM.
-  }
-
-  async onMainWindowUnload() {
-    // Nothing to clean up in the main window.
-  }
-
   /* -------------------------------------------------------------------- UI */
 }
 
@@ -336,12 +385,16 @@ Object.assign(
   content,
   destination,
   diagnosticsApi,
+  itemMenu,
+  itemSend,
   lookup,
   preferencesApi,
   readerMarks,
   readerUi,
   send,
   sendBatch,
+  sentCache,
+  autoSend,
   transport,
 );
 

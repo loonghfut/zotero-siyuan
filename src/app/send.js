@@ -182,6 +182,11 @@ export default {
       if (result.blockID && button) {
         this._updateRenderedMarkers(button.ownerDocument);
       }
+      // A send that worked proves SiYuan is back: the automatic sends that
+      // were waiting can go now instead of at the next timer.
+      if (typeof this._retryPendingQueueSoon === "function") {
+        this._retryPendingQueueSoon();
+      }
     }
     catch (e) {
       Zotero.logError(`ZoteroSiYuan: ${e}`);

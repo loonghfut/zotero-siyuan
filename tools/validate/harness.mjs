@@ -69,6 +69,7 @@ export const PANE_SCRIPTS = [
   "preferences-template.js",
   "preferences-variables.js",
   "preferences-pictures.js",
+  "preferences-sending.js",
   "preferences-actions.js",
   "preferences-boot.js",
 ];

@@ -54,12 +54,16 @@ export default {
   async _resolveFixedDocument() {
     const wanted = String(getPref("targetDocument", "") || "").trim();
     if (!wanted) {
-      throw new Error(
+      const error = new Error(
         getString(
           "zoteroSiYuan-no-target-document",
           "No target document is configured.",
         ),
       );
+      // Retrying an automatic send cannot fix a setting. The queue keeps it
+      // out instead of trying the same failure every few minutes.
+      error.permanent = true;
+      throw error;
     }
     if (isBlockID(wanted)) {
       return { kind: "document", notebook: null, documentID: wanted, title: "" };
@@ -98,12 +102,14 @@ export default {
       }
     }
     if (!documentID) {
-      throw new Error(
+      const error = new Error(
         getString(
           "zoteroSiYuan-target-document-not-found",
           "No document titled “%s” was found.",
         ).replace("%s", wanted),
       );
+      error.permanent = true;
+      throw error;
     }
     const target = {
       kind: "document",
