@@ -156,6 +156,42 @@ export default {
   },
 
   /**
+   * The template a destination kind uses.
+   *
+   * A note that becomes a document of its own is often a reading note with
+   * a different shape, so "one document per item" may have a template of
+   * its own. Empty means "the same one as everywhere else", which is what a
+   * user who never touched the second editor expects.
+   *
+   * @param {String} [kind] - "daily", "document" or "item"
+   * @returns {String}
+   */
+  getTemplateFor(kind) {
+    if (kind === "item") {
+      const own = String(getPref("itemTemplate", "") || "");
+      if (own.trim()) {
+        return own;
+      }
+    }
+    return this.getTemplate();
+  },
+
+  /** The per-item template exactly as it is stored ("" = use the common one). */
+  getItemTemplate() {
+    return String(getPref("itemTemplate", "") || "");
+  },
+
+  /** Store the per-item template. */
+  setItemTemplate(template) {
+    return setPref("itemTemplate", String(template == null ? "" : template));
+  },
+
+  /** Forget the per-item template, so item documents use the common one. */
+  resetItemTemplate() {
+    return setPref("itemTemplate", "");
+  },
+
+  /**
    * The raw template preference — empty means "use the built-in template".
    * The self test needs it to put the user's setup back exactly as it was.
    */
@@ -283,9 +319,16 @@ export default {
   /**
    * The cheat sheet the preferences pane shows: every variable with its
    * explanation, plus the ones the current template actually uses.
+   *
+   * @param {String} [slot] - "note" (the common template) or "item" (the
+   *   one for a document per item)
    */
-  getTemplateHelp() {
-    const template = this.getTemplate();
+  getTemplateHelp(slot = "note") {
+    // The editor edits one of the two templates; the item one is shown as
+    // it is stored, so an empty editor is exactly "use the common one".
+    const template = slot === "item"
+      ? this.getItemTemplate()
+      : this.getTemplate();
     const used = templateVariables(template);
     return {
       template,

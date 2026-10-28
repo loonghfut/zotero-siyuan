@@ -190,8 +190,8 @@ section("Regression guards");
     // shows the value.
     check(
       "the annotation's time comes from the item, only when it is shown",
-      /_annotationDate\(annotation\)/.test(allSource) &&
-        /_templateUses\("annotatorDate"\)/.test(allSource) &&
+      /_annotationDate\(annotation, template = null\)/.test(allSource) &&
+        /_templateUses\("annotatorDate", template\)/.test(allSource) &&
         /annotatorDate: readableStamp\(/.test(allSource),
     );
     check(

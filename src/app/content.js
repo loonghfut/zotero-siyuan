@@ -40,6 +40,7 @@ export default {
    * @param {Object} [known]
    * @param {Object} [known.attachment] - the PDF, when the caller has it
    * @param {String} [known.annotationKey] - the annotation key, when known
+   * @param {String} [known.template] - the template this send will render
    * @returns {Promise<Object>} the template variables
    */
   async _buildVars(annotation, reader, hooks = null, known = {}) {
@@ -56,7 +57,7 @@ export default {
     // A "框选" annotation has no text — the selection is a picture, and
     // the picture is put into the workspace before the note is written.
     const image = await this._preparePicture(annotation, annotationKey);
-    const annotationDate = await this._annotationDate(annotation);
+    const annotationDate = await this._annotationDate(annotation, known.template);
     return collectMetadata({
       annotation,
       parentItem,
@@ -265,13 +266,14 @@ export default {
    * happens when the template actually shows the time.
    *
    * @param {Object} annotation - the reader's annotation model
+   * @param {String} [template] - the template this send will render
    * @returns {Promise<String>} a Zotero timestamp, or ""
    */
-  async _annotationDate(annotation) {
+  async _annotationDate(annotation, template = null) {
     if (annotation.dateModified) {
       return annotation.dateModified;
     }
-    if (!this._templateUses("annotatorDate")) {
+    if (!this._templateUses("annotatorDate", template)) {
       return "";
     }
     const item = await this._getAnnotationItem(annotation);
@@ -286,14 +288,16 @@ export default {
    * invalidates the cache by itself.
    *
    * @param {String} name
+   * @param {String} [template] - the template to inspect; the common one
+   *   when the caller does not say
    * @returns {Boolean}
    */
-  _templateUses(name) {
-    const template = this.getTemplate();
-    if (!this._templateNames || this._templateNames.template !== template) {
+  _templateUses(name, template = null) {
+    const active = template == null ? this.getTemplate() : template;
+    if (!this._templateNames || this._templateNames.template !== active) {
       this._templateNames = {
-        template,
-        names: new Set(templateVariables(template)),
+        template: active,
+        names: new Set(templateVariables(active)),
       };
     }
     return this._templateNames.names.has(name);

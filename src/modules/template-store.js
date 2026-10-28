@@ -1,10 +1,11 @@
 /**
  * Zotero → SiYuan — the templates the user saved.
  *
- * The pane edits one template at a time, and that one is kept in the
- * `template` preference. This is the shelf beside it: the shapes the user
- * worked out once and wants to come back to — one for a quick excerpt, one
- * for a reading note, one with the abstract in it.
+ * The pane edits two templates — the common one and the one used when a
+ * note becomes a document of its own ("one document per item"). Each is
+ * kept in a preference of its own. This is the shelf beside them: the
+ * shapes the user worked out once and wants to come back to — one for a
+ * quick excerpt, one for a reading note, one with the abstract in it.
  *
  * Zotero preferences are strings, so the shelf is a JSON array in one of
  * them. Everything here is a plain function on plain data: the shelf is
@@ -77,6 +78,20 @@ function destinationOf(entry) {
     values[name] = value;
   }
   return values;
+}
+
+/**
+ * The editor slot a template belongs to.
+ *
+ * The pane edits two templates: the common one and the one used when a
+ * note becomes a document of its own. A saved template has to come back to
+ * the one it was saved from; "note" is the default, so only the other one
+ * is written down.
+ */
+export const TEMPLATE_SLOTS = ["note", "item"];
+
+function slotOf(entry) {
+  return entry && entry.slot === "item" ? { slot: "item" } : {};
 }
 
 /**
@@ -155,8 +170,8 @@ export function nameFromTemplate(template) {
  *
  * @param {String} raw - the preference
  * @returns {Array<{id: String, name: String, template: String,
- *   destination?: String, targetDocument?: String, itemDocName?: String,
- *   itemDocPath?: String}>}
+ *   slot?: String, destination?: String, targetDocument?: String,
+ *   itemDocName?: String, itemDocPath?: String}>}
  */
 export function parseSavedTemplates(raw) {
   let parsed;
@@ -189,7 +204,7 @@ export function parseSavedTemplates(raw) {
     seen.add(id);
     const name =
       cleanTemplateName(entry.name, nameFromTemplate(template)) || id;
-    list.push({ id, name, template, ...destinationOf(entry) });
+    list.push({ id, name, template, ...slotOf(entry), ...destinationOf(entry) });
     if (list.length >= MAX_SAVED_TEMPLATES) {
       break;
     }
@@ -212,6 +227,7 @@ export function serializeSavedTemplates(list) {
     id: String((entry && entry.id) || ""),
     name: String((entry && entry.name) || ""),
     template: String((entry && entry.template) || ""),
+    ...slotOf(entry),
     ...destinationOf(entry),
   }));
   return JSON.stringify(entries);
@@ -288,6 +304,7 @@ export function saveTemplate(list, entry = {}) {
       id: byId.id,
       name: name || byId.name,
       template,
+      ...slotOf(entry),
       ...destinationOf(entry),
     };
     return {
@@ -304,6 +321,7 @@ export function saveTemplate(list, entry = {}) {
       id: byName.id,
       name: byName.name,
       template,
+      ...slotOf(entry),
       ...destinationOf(entry),
     };
     return {
@@ -324,6 +342,7 @@ export function saveTemplate(list, entry = {}) {
     id: newTemplateId(current),
     name,
     template,
+    ...slotOf(entry),
     ...destinationOf(entry),
   };
   return {

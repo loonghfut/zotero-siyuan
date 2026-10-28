@@ -16,6 +16,7 @@ declare namespace _ZoteroTypes {
       "itemDocPath": string;
       "sentAction": string;
       "template": string;
+      "itemTemplate": string;
       "templates": string;
       "imageCompress": string;
       "imageQuality": string;

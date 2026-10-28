@@ -235,6 +235,34 @@
   <groupbox>
     <label><html:h2 data-l10n-id="pref-template-title"></html:h2></label>
 
+    <!--
+      Two templates live behind this one editor: the common one, and the
+      one for "one document per item" — a reading note is often a different
+      shape from a note appended to the daily log.
+    -->
+    <html:div class="zsi-field">
+      <html:label
+        class="zsi-label"
+        for="zotero-prefpane-zoteroSiYuan-template-scope"
+        data-l10n-id="pref-template-scope"
+      ></html:label>
+      <html:select
+        class="zsi-select"
+        id="zotero-prefpane-zoteroSiYuan-template-scope"
+      >
+        <html:option
+          value="note"
+          data-l10n-id="pref-template-scope-note"
+        ></html:option>
+        <html:option
+          value="item"
+          data-l10n-id="pref-template-scope-item"
+        ></html:option>
+      </html:select>
+    </html:div>
+
+    <html:p class="zsi-hint" data-l10n-id="pref-template-scope-hint"></html:p>
+
     <html:div class="zsi-field">
       <html:label
         class="zsi-label"

@@ -350,6 +350,11 @@ export default {
     if (hooks && hooks.notebook && notebook) {
       hooks.notebook(notebook);
     }
+    // "One document per item" can have a template of its own, so the shape
+    // of the note is decided before the values are collected: the template
+    // decides whether the annotation's date has to be looked up. The self
+    // test watches the daily-note path and uses its template.
+    const template = this.getTemplateFor(hooks ? "daily" : this._destinationKind());
 
     let vars;
     let markdown;
@@ -358,7 +363,7 @@ export default {
       if (hooks && hooks.stage) {
         hooks.stage("building the note");
       }
-      vars = await this._buildVars(annotation, reader, hooks);
+      vars = await this._buildVars(annotation, reader, hooks, { template });
       // Where the note goes is decided with the values the template will
       // use: a document per item is named after the item. Deciding it
       // before the markdown is written means a destination that cannot be
@@ -372,7 +377,10 @@ export default {
       destination = hooks
         ? { kind: "daily", notebook, documentID: "", title: "" }
         : await this._resolveDestination({ notebook, vars });
-      markdown = await this._buildContent(annotation, reader, hooks, { vars });
+      markdown = await this._buildContent(annotation, reader, hooks, {
+        vars,
+        template,
+      });
     }
     catch (e) {
       // The picture goes into the workspace while the content is built, so

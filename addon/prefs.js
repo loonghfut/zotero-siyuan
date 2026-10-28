@@ -15,6 +15,10 @@ pref("itemDocPath", "/");
 pref("sentAction", "ask");
 // The send template. Empty = use the built-in default.
 pref("template", "");
+// The template for "one document per item". Empty = use the template above:
+// a per-item note is often a reading note with a different shape, but not
+// every user needs two of them.
+pref("itemTemplate", "");
 // The templates the user saved for later: a JSON array of
 // { "id": …, "name": …, "template": … }. Empty = none saved yet.
 pref("templates", "[]");

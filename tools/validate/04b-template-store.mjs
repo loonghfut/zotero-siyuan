@@ -149,6 +149,27 @@ section("Templates the user saved");
   });
   check("a name given with an id renames it", renamed.list[0].name === "只要摘录");
 
+  // The pane edits two templates. A saved one has to come back to the side
+  // it was saved from, or an item template would become the common one.
+  const slotted = store.saveTemplate([], {
+    name: "文献笔记",
+    template: "{{title}}\n{{comment}}",
+    slot: "item",
+  });
+  const slotRoundTrip = store.parseSavedTemplates(
+    store.serializeSavedTemplates(slotted.list),
+  );
+  check(
+    "a saved template remembers which template it is",
+    slotted.entry.slot === "item" && slotRoundTrip[0].slot === "item",
+    JSON.stringify(slotRoundTrip),
+  );
+  check(
+    "the common template carries no slot",
+    store.saveTemplate([], { name: "摘录", template: "{{title}}" }).entry.slot ===
+      undefined,
+  );
+
   check(
     "an empty template is not saved",
     store.saveTemplate([], { name: "空", template: "  \n " }).error === "empty",
@@ -199,6 +220,33 @@ section("The shelf in the pane");
   const prefs = readFileSync(join(ROOT, "addon", "prefs.js"), "utf8");
 
   check("the plugin has a preference for the shelf", prefs.includes('pref("templates"'));
+  check(
+    "the plugin has a preference for the per-item template",
+    prefs.includes('pref("itemTemplate"'),
+  );
+  check(
+    "the pane can switch which template it edits",
+    xhtml.includes(
+      'id="zotero-prefpane-zoteroSiYuan-template-scope"',
+    ) &&
+      pane.includes("this.TEMPLATE_SCOPE_ID") &&
+      pane.includes("this._showTemplateSlot(target.value)"),
+  );
+  check(
+    "the editor writes the template of the side it is on",
+    pane.includes("_saveTemplateText") &&
+      pane.includes("addon.setItemTemplate(text)") &&
+      pane.includes("addon.setTemplate(text)"),
+  );
+  check(
+    "a send picks the template of its destination",
+    allSource.includes(
+      'this.getTemplateFor(hooks ? "daily" : this._destinationKind())',
+    ) &&
+      allSource.includes(
+        "const template = this.getTemplateFor(this._destinationKind())",
+      ),
+  );
 
   for (const id of [
     "template-saved",
@@ -361,6 +409,31 @@ section("The shelf, through the plugin");
     check(
       "deleting one that is gone changes nothing",
       api.deleteSavedTemplate("nope").ok === false,
+    );
+
+    // "One document per item" may have a template of its own; until it has
+    // one it uses the common template, which is what an untouched install
+    // expects.
+    check(
+      "the per-item template starts as the common one",
+      api.getTemplateFor("item") === api.getTemplate(),
+    );
+    api.setItemTemplate("> {{quoteCallout}}\n\n{{comment}}");
+    check(
+      "a per-item template is used only for that destination",
+      api.getTemplateFor("item") === "> {{quoteCallout}}\n\n{{comment}}" &&
+        api.getTemplateFor("daily") === api.getTemplate() &&
+        api.getTemplate() !== api.getTemplateFor("item"),
+    );
+    check(
+      "the editor is shown the per-item template",
+      api.getTemplateHelp("item").template ===
+        "> {{quoteCallout}}\n\n{{comment}}",
+    );
+    api.resetItemTemplate();
+    check(
+      "clearing it falls back to the common one",
+      api.getTemplateFor("item") === api.getTemplate(),
     );
 
     // A preference somebody broke by hand: the pane still has to open.

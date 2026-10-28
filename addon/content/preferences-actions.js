@@ -1,5 +1,6 @@
 /**
- * Zotero → SiYuan — the buttons that talk to the plugin: test, rescan, self test.
+ * Zotero → SiYuan — the buttons that talk to the plugin: test, rescan, self
+ * test — and the template preview, which asks the plugin to render one.
  *
  * One of several scripts that share the pane's scope: the object itself is
  * created in `preferences.js`, this file only adds its own methods. The order
@@ -115,6 +116,179 @@ Object.assign(ZoteroSiYuanPreferences, {
     if (addon && addon.setPref) {
       addon.setPref("sentAction", String(value || "ask"));
     }
+  },
+
+  /* -------------------------------------------------- which template */
+
+  /**
+   * Show one of the two templates in the editor.
+   *
+   * "One document per item" can have a template of its own. Both are
+   * edited in the same textarea — the switch only decides which preference
+   * the editor reads and writes, so the preview, the variables and the
+   * problems keep working exactly as they do for the common one.
+   *
+   * @param {String} slot - "note" or "item"
+   */
+  _showTemplateSlot: function (slot) {
+    var addon = Zotero.ZoteroSiYuan;
+    if (!addon || !addon.getTemplateHelp) {
+      return;
+    }
+    this._templateSlot = slot === "item" ? "item" : "note";
+    var help = addon.getTemplateHelp(this._templateSlot);
+    var area = document.getElementById(this.TEMPLATE_ID);
+    if (area) {
+      area.value = help.template;
+      this._caret = help.template.length;
+      this._caretEnd = this._caret;
+    }
+    // The per-item template is empty by default, and that means "use the
+    // common one" — say so instead of leaving the user with a blank box.
+    this._setStatus(
+      this._templateSlot === "item" && !help.template.trim()
+        ? this._text(
+            "zoteroSiYuan-pref-template-item-inherit",
+            "Empty — the common template will be used",
+          )
+        : "",
+      false,
+    );
+    this._variables = help.variables || [];
+    this._renderVariables(this._filteredVariables());
+    this._showProblems(help.template);
+    this._refreshUsedVariables();
+    this._refreshPreview();
+  },
+
+  /** Store what the editor holds in the template slot it is editing. */
+  _saveTemplateText: function (value) {
+    var addon = Zotero.ZoteroSiYuan;
+    if (!addon) {
+      return;
+    }
+    var text = String(value == null ? "" : value);
+    if (this._templateSlot === "item" && addon.setItemTemplate) {
+      addon.setItemTemplate(text);
+    }
+    else if (addon.setTemplate) {
+      addon.setTemplate(text);
+    }
+  },
+
+  /**
+   * What "restore the default" means for the slot being edited.
+   *
+   * The common template goes back to the built-in one; the per-item one
+   * has no built-in of its own, so it goes back to "use the common one".
+   *
+   * @returns {String} what the editor should show afterwards
+   */
+  _resetTemplateText: function () {
+    var addon = Zotero.ZoteroSiYuan;
+    if (!addon) {
+      return "";
+    }
+    if (this._templateSlot === "item" && addon.resetItemTemplate) {
+      addon.resetItemTemplate();
+      return addon.getItemTemplate ? addon.getItemTemplate() : "";
+    }
+    if (addon.resetTemplate) {
+      addon.resetTemplate();
+    }
+    return addon.getTemplate ? addon.getTemplate() : "";
+  },
+
+  /** Re-render the preview a moment after the last keystroke. */
+  _schedulePreview: function () {
+    var self = this;
+    if (this._previewTimer) {
+      clearTimeout(this._previewTimer);
+    }
+    this._previewTimer = setTimeout(function () {
+      self._previewTimer = null;
+      self._refreshPreview();
+      self._refreshUsedVariables();
+    }, 250);
+  },
+
+  /** Mark the variables the template in the editor already uses. */
+  _refreshUsedVariables: function () {
+    var addon = Zotero.ZoteroSiYuan;
+    if (!addon || !addon.getTemplateHelp) {
+      return;
+    }
+    var help = addon.getTemplateHelp(this._templateSlot);
+    var used = help.usedNames || [];
+    // An empty per-item template falls back to the common one, so that is
+    // the template whose variables are really in use.
+    if (
+      this._templateSlot === "item" &&
+      !String(help.template || "").trim()
+    ) {
+      used = addon.getTemplateHelp("note").usedNames || [];
+    }
+    var rows = document.querySelectorAll(
+      "#" + this.VARIABLES_ID + " tr[data-variable]",
+    );
+    for (var i = 0; i < rows.length; i++) {
+      var name = rows[i].getAttribute("data-variable");
+      if (used.indexOf(name) !== -1) {
+        rows[i].classList.add("zotero-siyuan-variable-used");
+      }
+      else {
+        rows[i].classList.remove("zotero-siyuan-variable-used");
+      }
+    }
+  },
+
+  /** Render the template in the editor with a real annotation. */
+  _refreshPreview: function () {
+    var self = this;
+    var addon = Zotero.ZoteroSiYuan;
+    var area = document.getElementById(this.TEMPLATE_ID);
+    if (!addon || !addon.previewTemplate || !area) {
+      return;
+    }
+    // The preview is asked for on every keystroke and the answer takes a
+    // moment. Without a stamp, a slow answer for an earlier text would
+    // overwrite the preview of what is in the box now.
+    this._previewToken = (this._previewToken || 0) + 1;
+    var token = this._previewToken;
+    // An empty per-item template means "use the common one", so the
+    // preview shows that one — a blank preview would look broken.
+    var text = area.value;
+    if (this._templateSlot === "item" && !String(text).trim() && addon.getTemplate) {
+      text = addon.getTemplate();
+    }
+    addon.previewTemplate(text).then(
+      function (result) {
+        if (token !== self._previewToken) {
+          return;
+        }
+        var box = document.getElementById(self.PREVIEW_ID);
+        if (box) {
+          box.textContent = result.text;
+        }
+        if (result.unknown && result.unknown.length) {
+          self._setStatus(
+            self._text(
+              "zoteroSiYuan-pref-template-unknown",
+              "Unknown variables",
+            ) +
+              " " +
+              result.unknown.join(", "),
+            true,
+          );
+        }
+      },
+      function (e) {
+        if (token !== self._previewToken) {
+          return;
+        }
+        self._setStatus(String(e && e.message ? e.message : e), true);
+      },
+    );
   },
 
   /**

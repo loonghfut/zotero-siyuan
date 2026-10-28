@@ -116,6 +116,7 @@ reader 画注释 header
    ├─ _sendAnnotation(...)
    │    ├─ _resolveNotebook()          先定笔记本：这一步失败时还没写任何图片
    │    │                             （固定文档目标不需要笔记本）
+   │    ├─ getTemplateFor(kind)        item 用单独模板，空则用通用模板
    │    ├─ _buildVars(...)             图片落盘 + 模板变量
    │    ├─ _resolveDestination(...)    日记 / 指定文档 / 每篇文献一篇
    │    ├─ _buildContent(..., {vars})  渲染模板
@@ -209,6 +210,11 @@ appendPicture(text, image)    图片 Markdown 插到正文        ← _buildCont
 固定文档目标**不要求笔记本设置有效**：它有自己的文档 ID，`_resolveNotebook()` 根本不必跑。
 「每篇文献一个文档」的标题用和正文同一份模板变量渲染，所以 `{{title}}` 和正文里指的是同一篇。
 
+模板也按目的地分开：`item` 用 `itemTemplate`，它为空时回落到 `template`。选择发生在
+`_buildVars` 之前（`getTemplateFor(kind)`），因为模板决定要不要为了 `{{annotatorDate}}`
+去读条目；单条和批量都走同一条规则。设置页只有一支编辑框，顶部「模板用途」决定它在读写
+哪一个偏好。
+
 已发送检查发生在任何渲染/进程之前：`_index.getEntry(annotationKey)`。行为由偏好
 `sentAction` 决定：
 
@@ -278,9 +284,9 @@ pictureMarkdown(assetPath, alt)      生成 ![](assets/…) 插入正文
 **用户保存的模板**（`template-store.js`，纯函数，不碰 Zotero）：
 
 ```
-偏好 templates = [{ id, name, template, destination?, targetDocument?,
+偏好 templates = [{ id, name, template, slot?, destination?, targetDocument?,
                     itemDocName?, itemDocPath? }, …]（JSON 字符串，上限 50）
-   saveTemplate( shelf, { id?, name?, template?, …destination } )
+   saveTemplate( shelf, { id?, name?, template?, slot?, …destination } )
      id 命中          → 更新那一份（给了名字就顺便改名）
      名字命中          → 更新同名的那一份（不会堆出副本）
      都没有            → 新建一份，追加到末尾
@@ -294,6 +300,8 @@ pictureMarkdown(assetPath, alt)      生成 ![](assets/…) 插入正文
   套用一份模板时这几个字段一并写进偏好，所以"发到某篇文献的笔记"可以一键切换；
   没带目的地的旧模板照常工作，只是不改目的地。字段只在是非空字符串时才存，读的时候
   缺失的键自然回落到当前偏好——模板不会用一个空串把用户的全局设置清掉。
+- 模板还记得自己属于哪一支编辑框（`slot: "item"`）。套用时先切回那一边，再写进去；
+  通用模板不写 `slot`，所以旧模板一律落到通用模板这一边。
 - 面板侧：下拉列表 + 名字框 + 保存/套用/删除；**删除按两次**（`_deleteArm`），
   换一份就把待删状态收回去；列表为空时「套用」「删除」置灰。
 - 自检（`ui: true`）真的存一份、套回来、删掉，最后把 `templates` 偏好原样写回。
@@ -350,10 +358,10 @@ Zotero 把 `scripts` 数组里的文件**按顺序加载进同一个面板作用
 | 文件 | 职责 |
 |---|---|
 | `preferences.js` | 建对象：元素 id、常量、状态、`init()`、共享工具 |
-| `preferences-template.js` | 模板编辑器、预览、预设、条件插入、我的模板 |
+| `preferences-template.js` | 模板编辑器、预设、我的模板 |
 | `preferences-variables.js` | 变量列表、筛选、条件变量选择 |
 | `preferences-pictures.js` | 图片压缩设置、框选检查 |
-| `preferences-actions.js` | 测试连接、重扫索引、自检 |
+| `preferences-actions.js` | 测试连接、重扫索引、自检、预览、模板用途与目标位置 |
 | `preferences-boot.js` | **最后**加载，调用 `init()` |
 
 顺序错了面板就是空的，`tools/validate/00-layout.mjs` 会核对这份顺序。

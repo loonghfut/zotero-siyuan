@@ -279,10 +279,15 @@ export default {
       notebook = this._destinationKind() === "document"
         ? null
         : await this._resolveNotebook();
+      // Every note of a batch goes to the same kind of place, so they are
+      // rendered with the same template.
+      const template = this.getTemplateFor(this._destinationKind());
       let firstVars = null;
       for (const job of jobs) {
         try {
-          const vars = await this._buildVars(job.annotation, reader);
+          const vars = await this._buildVars(job.annotation, reader, null, {
+            template,
+          });
           if (!firstVars) {
             firstVars = vars;
           }
@@ -290,7 +295,7 @@ export default {
             job.annotation,
             reader,
             null,
-            { vars },
+            { vars, template },
           );
           built.push({
             ...job,

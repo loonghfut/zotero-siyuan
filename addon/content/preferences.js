@@ -24,6 +24,7 @@ var ZoteroSiYuanPreferences = {
   RESET_BUTTON_ID: "zotero-prefpane-zoteroSiYuan-reset-template",
   RESCAN_BUTTON_ID: "zotero-prefpane-zoteroSiYuan-rescan",
   TEMPLATE_ID: "zotero-prefpane-zoteroSiYuan-template",
+  TEMPLATE_SCOPE_ID: "zotero-prefpane-zoteroSiYuan-template-scope",
   PREVIEW_ID: "zotero-prefpane-zoteroSiYuan-preview",
   VARIABLES_ID: "zotero-prefpane-zoteroSiYuan-variables",
   STATUS_ID: "zotero-prefpane-zoteroSiYuan-template-status",
@@ -63,6 +64,10 @@ var ZoteroSiYuanPreferences = {
   // Every variable the plugin knows about, and the ones the current
   // template already uses.
   _variables: [],
+
+  // Which template the editor is editing: "note" for the common one,
+  // "item" for the one used by "one document per item".
+  _templateSlot: "note",
 
   // Where the caret is, and how far the selection reaches.
   //
@@ -186,6 +191,9 @@ var ZoteroSiYuanPreferences = {
         // one before it.
         this._savedTemplatePicked();
       }
+      else if (target.id === this.TEMPLATE_SCOPE_ID) {
+        this._showTemplateSlot(target.value);
+      }
       else if (target.id === this.IMAGE_COMPRESS_ID) {
         this._saveImageSetting("imageCompress", target.checked ? "1" : "0");
       }
@@ -287,6 +295,13 @@ var ZoteroSiYuanPreferences = {
     var area = document.getElementById(this.TEMPLATE_ID);
     if (area) {
       area.value = help.template;
+    }
+    // The pane always opens on the common template; the per-item one is a
+    // deliberate switch.
+    this._templateSlot = "note";
+    var scope = document.getElementById(this.TEMPLATE_SCOPE_ID);
+    if (scope) {
+      scope.value = "note";
     }
     // A `data-l10n-id` on an `<input>` has nothing to localize — the
     // placeholder is an attribute, so it is set here.
