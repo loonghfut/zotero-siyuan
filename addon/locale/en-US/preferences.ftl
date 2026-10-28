@@ -16,6 +16,21 @@ pref-rescanning = Scanning SiYuan…
 pref-rescanned = Sent annotations found
 pref-hint = Leave the CLI path empty to find it automatically. Leave the workspace empty to use the one the siyuan CLI currently uses, and the notebook empty to use the first one.
 
+pref-destination-title = Send to
+pref-destination = Destination
+pref-destination-daily = Today's daily note
+pref-destination-document = A document
+pref-destination-item = One document per item
+pref-target-document = Document title or ID
+pref-item-doc-name = Title of the new document (template variables work)
+pref-item-doc-path = Parent path (for example /Reading)
+pref-sent-action = An annotation that was already sent
+pref-sent-action-ask = Ask me each time
+pref-sent-action-skip = Skip it
+pref-sent-action-send = Send another one
+pref-sent-action-replace = Replace the last one
+pref-destination-hint = The default is today's daily note. With “A document”, enter its title or block ID. With “One document per item”, the plugin creates a document for the item in the chosen notebook and remembers it with custom-zotero-item-key, so later notes go into the same one. Saving a template also saves these destination settings, and loading it restores them.
+
 pref-picture-title = Area-selection pictures
 pref-image-compress = Compress the picture before sending
 pref-image-quality = Compression quality

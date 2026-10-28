@@ -1,6 +1,18 @@
 pref("cliPath", "");
 pref("workspace", "");
 pref("notebook", "");
+// Where a note goes: "daily" (today's daily note), "document" (a fixed
+// document) or "item" (one document per Zotero item).
+pref("destination", "daily");
+// For "document": a document id, or the title of a document to look up.
+pref("targetDocument", "");
+// For "item": the title template and the parent document path of the
+// document created for an item.
+pref("itemDocName", "{{title}}");
+pref("itemDocPath", "/");
+// What a click on an already-sent annotation does: "ask", "skip", "send"
+// (append another note) or "replace" (delete the old note first).
+pref("sentAction", "ask");
 // The send template. Empty = use the built-in default.
 pref("template", "");
 // The templates the user saved for later: a JSON array of

@@ -102,6 +102,34 @@ export default {
   },
 
   /**
+   * Remove every marker of one annotation, hand-made or drawn by the
+   * reader.
+   *
+   * "Replace" writes a new block for the same annotation, and the old
+   * marker points at a block that no longer exists. The hand-made ones are
+   * remembered by `_manualLinksOf`; the reader's own ones are in the
+   * document until its next render.
+   *
+   * @param {Object} doc - the reader document
+   * @param {String} annotationKey
+   * @returns {Number} how many were removed
+   */
+  _removeSentMarker(doc, annotationKey) {
+    const key = String(annotationKey || "");
+    let removed = this._dropManualLinks(doc, key);
+    if (!doc || !doc.querySelectorAll || !/^[A-Za-z0-9]+$/.test(key)) {
+      return removed;
+    }
+    for (const link of doc.querySelectorAll(
+      `.zotero-siyuan-sent-link[data-zsi-for="${key}"]`,
+    )) {
+      link.remove();
+      removed++;
+    }
+    return removed;
+  },
+
+  /**
    * The "already sent" marker: the SiYuan logo, linking to the block.
    * @param {Object} doc - the reader document
    * @param {String} blockID - the SiYuan block

@@ -148,6 +148,12 @@ export class SiYuanIndex {
 	constructor() {
 		// annotation key → SiYuan block id
 		this.blocks = new Map();
+		// What is known about a sent note beyond its first block: the
+		// document it lives in, every block the send produced, and the
+		// Markdown that was written. "Replace" and "undo" need that; a
+		// scan can only recover a part of it, so it is kept beside the map
+		// instead of in it.
+		this.details = new Map();
 		// attachment key → how many annotations of it are in the index
 		this.perAttachment = new Map();
 		this.scannedAt = "";
@@ -185,15 +191,45 @@ export class SiYuanIndex {
 	}
 
 	/**
+	 * What is known about a sent annotation.
+	 *
+	 * @param {String} annotationKey
+	 * @returns {Object|null} { blockID, documentID, blocks, markdown }
+	 */
+	getEntry(annotationKey) {
+		const key = String(annotationKey || "");
+		const blockID = this.get(key);
+		if (!blockID) {
+			return null;
+		}
+		const detail = this.details.get(key) || {};
+		return {
+			blockID,
+			documentID: detail.documentID || "",
+			blocks: Array.isArray(detail.blocks) ? detail.blocks.slice() : [],
+			markdown: detail.markdown || "",
+		};
+	}
+
+	/**
 	 * Remember that an annotation went to a block.
 	 * @param {String} annotationKey
 	 * @param {String} blockID
+	 * @param {Object} [details] - { documentID, blocks, markdown }
 	 */
-	add(annotationKey, blockID) {
+	add(annotationKey, blockID, details = {}) {
 		if (annotationKey && blockID) {
 			const key = String(annotationKey);
 			this.blocks.set(key, String(blockID));
 			this._revisions.set(key, ++this._revision);
+			this.details.set(key, {
+				blockID: String(blockID),
+				documentID: String(details.documentID || ""),
+				blocks: Array.isArray(details.blocks)
+					? details.blocks.map(String)
+					: [],
+				markdown: String(details.markdown || ""),
+			});
 		}
 	}
 
@@ -207,6 +243,7 @@ export class SiYuanIndex {
 		}
 		const key = String(annotationKey);
 		this.blocks.delete(key);
+		this.details.delete(key);
 		this._revisions.delete(key);
 	}
 
@@ -280,6 +317,7 @@ export class SiYuanIndex {
 			if (key && this.scannedKey && key !== this.scannedKey) {
 				// Nothing known about the old workspace is true of this one.
 				this.blocks = new Map();
+				this.details = new Map();
 				this.perAttachment = new Map();
 				this._revisions.clear();
 			}
@@ -313,7 +351,7 @@ export class SiYuanIndex {
 		const revision = this._revision;
 		const rows = await cli.runJSON([
 			"sql",
-			"SELECT id, markdown, type FROM blocks " +
+			"SELECT id, markdown, type, root_id FROM blocks " +
 				// The key alone: the link of a group library has a different
 				// prefix, and narrowing on the personal one hid those notes.
 				`WHERE markdown LIKE '%${attachmentKey}%' ` +
@@ -340,6 +378,12 @@ export class SiYuanIndex {
 				continue;
 			}
 			this.blocks.set(key, row.id);
+			this.details.set(key, {
+				blockID: row.id,
+				documentID: row.root_id || "",
+				blocks: [],
+				markdown: row.markdown || "",
+			});
 		}
 		this.perAttachment.set(String(attachmentKey), found);
 		return found;
@@ -360,7 +404,7 @@ export class SiYuanIndex {
 			// The link lives in the *markdown* column: the plain-text
 			// `content` column has it stripped, and SiYuan rewrites a
 			// non-http link into <span data-href="…">.
-			"SELECT id, markdown, type FROM blocks " +
+			"SELECT id, markdown, type, root_id FROM blocks " +
 				`WHERE markdown LIKE ${ZOTERO_LINK_LIKE} ` +
 				// Newest first, so a re-sent annotation points at its latest
 				// block; and a callout before the paragraph inside it, so
@@ -370,11 +414,18 @@ export class SiYuanIndex {
 		// Build the new index first: a failing query must not throw away
 		// what is already known.
 		const found = new Map();
+		const foundDetails = new Map();
 		const perAttachment = new Map();
 		for (const row of rows || []) {
 			const key = parseAnnotationKey(row.markdown);
 			if (key && !found.has(key)) {
 				found.set(key, row.id);
+				foundDetails.set(key, {
+					blockID: row.id,
+					documentID: row.root_id || "",
+					blocks: [],
+					markdown: row.markdown || "",
+				});
 				// Counted once per annotation: a note is usually more than
 				// one block, and a PDF with twenty notes is not forty.
 				const attachment = parseAttachmentKey(row.markdown);
@@ -392,9 +443,19 @@ export class SiYuanIndex {
 		for (const [key, blockID] of this.blocks) {
 			if ((this._revisions.get(key) || 0) > revision) {
 				found.set(key, blockID);
+				foundDetails.set(
+					key,
+					this.details.get(key) || {
+						blockID,
+						documentID: "",
+						blocks: [],
+						markdown: "",
+					},
+				);
 			}
 		}
 		this.blocks = found;
+		this.details = foundDetails;
 		this.perAttachment = perAttachment;
 		// Keep the stamps in step with the index, so it cannot grow forever.
 		for (const key of [...this._revisions.keys()]) {

@@ -56,7 +56,12 @@ section("Area-selection pictures");
   );
   check(
     "the note is built with the picture",
-    /_buildContent\([^)]*\)\s*\{[\s\S]*?await this\._preparePicture\(/.test(index),
+    // The picture is put into the workspace while the values the template
+    // is rendered with are collected, and `appendPicture` keeps it even
+    // when the template does not mention it.
+    /_buildVars\([^)]*\)\s*\{[\s\S]*?await this\._preparePicture\(/.test(
+      index,
+    ) && /appendPicture\(\s*text,\s*vars\.image/.test(index),
   );
   check(
     "the batch path carries the picture along",

@@ -3,7 +3,13 @@
  */
 
 import { getString } from "../utils/locale.js";
+import { getPref } from "../utils/prefs.js";
 import { siyuanBlockLink } from "../modules/metadata.js";
+import {
+  pictureAssetNames,
+  pictureFile,
+  removePicture,
+} from "../modules/siyuan-image.js";
 import { showToast } from "../modules/toast.js";
 import { isWriteUnknown } from "../modules/siyuan-process.js";
 
@@ -77,15 +83,21 @@ export default {
    * One send at a time: the buttons of the reader are disabled while it
    * runs, and a click that slips through says "sending" instead of doing
    * nothing at all.
+   *
+   * @param {Object} annotation
+   * @param {Object} reader
+   * @param {Object} button
+   * @param {Object} [options] - { alreadySent, replaceEntry, doc }
+   * @returns {Promise<void>}
    */
-  async _send(annotation, reader, button) {
+  async _send(annotation, reader, button, options = {}) {
     return await this._trackInflight(
-      this._runSend(annotation, reader, button),
+      this._runSend(annotation, reader, button, options),
     );
   },
 
   /** One send, start to finish — see `_send`. */
-  async _runSend(annotation, reader, button) {
+  async _runSend(annotation, reader, button, options = {}) {
     // The hooks are picked up here, synchronously: the click handler calls
     // `_send` before it returns, so a hook that was put on the addon just
     // before the click is certain to be the one this send uses — and a
@@ -97,6 +109,7 @@ export default {
       // write into a state that is already being torn down.
       return;
     }
+    const doc = (button && button.ownerDocument) || options.doc || null;
     if (this._sending) {
       // Another send is still running. Say so, instead of doing nothing —
       // a button that does not react looks like a broken plugin.
@@ -107,7 +120,28 @@ export default {
       );
       return;
     }
-    const doc = (button && button.ownerDocument) || null;
+
+    // Already sent? Ask what the user wants — unless they already said so
+    // in the settings, or this is the self test (which must never pop a
+    // question at the user).
+    if (!hooks && !options.alreadySent) {
+      const check = await this._alreadySent(annotation);
+      if (check.entry) {
+        const action = this._sentAction();
+        if (action === "skip") {
+          this._notifySkipped(check.entry, doc);
+          return;
+        }
+        if (action === "ask") {
+          this._askAlreadySent(annotation, reader, button, check, doc);
+          return;
+        }
+        if (action === "replace") {
+          options = { ...options, replaceEntry: check.entry };
+        }
+      }
+    }
+
     this._sending = true;
     // Every button of this reader, not only the one that was clicked: the
     // second click of a user who is unsure whether the first one worked
@@ -119,7 +153,12 @@ export default {
     }
 
     try {
-      const result = await this._sendAnnotation(annotation, reader, hooks);
+      const result = await this._sendAnnotation(
+        annotation,
+        reader,
+        hooks,
+        { ...options, doc },
+      );
       // A send the self test watched is not the user's send: it must not
       // turn the button into "sent" or pop a bubble, or the user believes
       // they sent something they did not.
@@ -132,7 +171,11 @@ export default {
         this._notify(result, doc);
       }
       Zotero.debug(
-        `ZoteroSiYuan: appended an annotation to the SiYuan daily note in notebook ${result.notebook.name} (${result.notebook.id}) via ${result.transport}` +
+        `ZoteroSiYuan: appended an annotation to SiYuan ` +
+          (result.notebook
+            ? `in notebook ${result.notebook.name} (${result.notebook.id})`
+            : `in document ${result.documentID}`) +
+          ` via ${result.transport}` +
           (result.blockID ? `, block ${result.blockID}` : ""),
       );
       // The marker shows up right away — no need to reopen the PDF.
@@ -159,18 +202,136 @@ export default {
     }
   },
 
+  /** How a click on an already-sent annotation behaves. */
+  _sentAction() {
+    const value = String(getPref("sentAction", "ask") || "").trim();
+    if (value === "skip" || value === "send" || value === "replace") {
+      return value;
+    }
+    return "ask";
+  },
+
+  /**
+   * What the index knows about this annotation.
+   *
+   * @param {Object} annotation
+   * @returns {Promise<{key: String, entry: Object|null}>}
+   */
+  async _alreadySent(annotation) {
+    const key = await this._resolveAnnotationKey(annotation);
+    const entry = key ? this._index.getEntry(key) : null;
+    return { key, entry: entry || null };
+  },
+
+  /**
+   * Ask what to do with an annotation that is already in SiYuan.
+   *
+   * The bubble stays until the user picks one of the three answers, or
+   * closes it. Sending again and replacing are ordinary sends with a
+   * remembered choice, so the button's busy state, the write and the
+   * marker all stay in one place.
+   *
+   * @param {Object} annotation
+   * @param {Object} reader
+   * @param {Object} button
+   * @param {{key: String, entry: Object}} check
+   * @param {Object} doc
+   */
+  _askAlreadySent(annotation, reader, button, check, doc = null) {
+    const entry = check.entry;
+    try {
+      showToast({
+        doc,
+        title: getString(
+          "zoteroSiYuan-already-sent-title",
+          "This annotation was already sent",
+        ),
+        message: getString(
+          "zoteroSiYuan-already-sent-message",
+          "It is already in SiYuan. Open the existing note, send another " +
+            "one, or replace the last one?",
+        ),
+        // The question waits for an answer.
+        timeout: 0,
+        actions: [
+          {
+            label: getString(
+              "zoteroSiYuan-already-sent-open",
+              "Open existing",
+            ),
+            primary: true,
+            onClick: () => this._openInSiYuan(entry.blockID),
+          },
+          {
+            label: getString(
+              "zoteroSiYuan-already-sent-send",
+              "Send anyway",
+            ),
+            onClick: () =>
+              this._send(annotation, reader, button, { alreadySent: "send" }),
+          },
+          {
+            label: getString(
+              "zoteroSiYuan-already-sent-replace",
+              "Replace last",
+            ),
+            onClick: () =>
+              this._send(annotation, reader, button, {
+                alreadySent: "replace",
+                replaceEntry: entry,
+              }),
+          },
+        ],
+      });
+    }
+    catch (e) {
+      Zotero.debug(`ZoteroSiYuan: could not ask about the old note: ${e}`);
+    }
+  },
+
+  /**
+   * Say that an annotation was left out because it is already in SiYuan.
+   *
+   * @param {Object} entry
+   * @param {Object} doc
+   */
+  _notifySkipped(entry, doc = null) {
+    try {
+      showToast({
+        doc,
+        title: getString(
+          "zoteroSiYuan-already-sent-title",
+          "This annotation was already sent",
+        ),
+        message: getString(
+          "zoteroSiYuan-already-sent-skipped",
+          "This annotation was already sent — skipped.",
+        ),
+        link: siyuanBlockLink(entry.blockID),
+        linkLabel: getString("zoteroSiYuan-toast-open", "Open in SiYuan"),
+        onLink: entry.blockID ? () => this._openInSiYuan(entry.blockID) : null,
+      });
+    }
+    catch (e) {
+      Zotero.debug(`ZoteroSiYuan: could not report the skipped send: ${e}`);
+    }
+  },
+
   /**
    * Render one annotation and send it to SiYuan.
    *
-   * The single-annotation button and the batch action share this, so both
-   * behave exactly the same.
+   * The single-annotation button and the batch action share the rendering,
+   * so both behave exactly the same.
    *
    * @param {Object} annotation - the reader's annotation model
    * @param {Object} reader - the reader tab
    * @param {Object} [hooks] - what the self test watches this send with
+   * @param {Object} [options]
+   * @param {Object} [options.replaceEntry] - the note this send replaces
+   * @param {Object} [options.doc] - the reader document
    * @returns {Promise<Object>} what happened
    */
-  async _sendAnnotation(annotation, reader, hooks = null) {
+  async _sendAnnotation(annotation, reader, hooks = null, options = {}) {
     // The notebook comes first: resolving it can fail (SiYuan not running,
     // no notebook configured), and a send that fails there should not have
     // put a picture into the workspace at all — the picture and the note
@@ -178,29 +339,57 @@ export default {
     if (hooks && hooks.stage) {
       hooks.stage("resolving the notebook");
     }
-    const notebook = await this._resolveNotebook();
-    if (hooks && hooks.notebook) {
+    // A fixed document is addressed by its own id; the notebook setting is
+    // not used to find it, so it does not have to be valid either. The self
+    // test watches the daily-note path, so it keeps the notebook too.
+    const notebook = hooks
+      ? await this._resolveNotebook()
+      : this._destinationKind() === "document"
+        ? null
+        : await this._resolveNotebook();
+    if (hooks && hooks.notebook && notebook) {
       hooks.notebook(notebook);
     }
 
+    let vars;
     let markdown;
+    let destination;
     try {
-      // The picture goes into the workspace while the content is built, so
-      // a failure here has to take it back too.
-      markdown = await this._buildContent(annotation, reader, hooks);
+      if (hooks && hooks.stage) {
+        hooks.stage("building the note");
+      }
+      vars = await this._buildVars(annotation, reader, hooks);
+      // Where the note goes is decided with the values the template will
+      // use: a document per item is named after the item. Deciding it
+      // before the markdown is written means a destination that cannot be
+      // found fails before anything is appended.
+      if (hooks && hooks.stage) {
+        hooks.stage("resolving the destination");
+      }
+      // The self test watches the daily-note path — the same one its hooks
+      // know how to dry-run and clean up. The user's destination must not
+      // turn the test into a document create it cannot take back.
+      destination = hooks
+        ? { kind: "daily", notebook, documentID: "", title: "" }
+        : await this._resolveDestination({ notebook, vars });
+      markdown = await this._buildContent(annotation, reader, hooks, { vars });
     }
     catch (e) {
+      // The picture goes into the workspace while the content is built, so
+      // a failure here has to take it back too.
       await this._dropPicture();
       throw e;
     }
 
     let sent;
     try {
-      sent = (await this._append(notebook.id, markdown, hooks)) || {};
+      sent = (await this._append(notebook ? notebook.id : "", markdown, hooks, {
+        target: destination,
+      })) || {};
     }
     catch (e) {
       // The write started but its answer never arrived — it may well be in
-      // the daily note, and that note refers to this picture. Deleting it
+      // the document, and that note refers to this picture. Deleting it
       // would leave a broken image behind, so it stays.
       if (!isWriteUnknown(e)) {
         await this._dropPicture();
@@ -214,12 +403,101 @@ export default {
     // change there cannot silently lose the block id.
     const transport = typeof sent === "string" ? sent : sent.transport;
     const blockID = typeof sent === "string" ? "" : sent.blockID || "";
+    const documentID = (typeof sent === "object" && sent.documentID) ||
+      destination.documentID || "";
     // Remember it right away — no need to wait for the next scan.
-    const annotationKey = await this._resolveAnnotationKey(annotation);
+    const annotationKey = vars.annotationId || "";
     if (annotationKey && blockID) {
-      this._index.add(annotationKey, blockID);
+      this._index.add(annotationKey, blockID, {
+        documentID,
+        blocks: Array.isArray(sent.blocks) && sent.blocks.length
+          ? sent.blocks
+          : [blockID],
+        markdown,
+      });
     }
-    return { transport, blockID, notebook, markdown };
+
+    // Replacing writes the new note first, so a failed write leaves the old
+    // one in place. Only after the new one is safely in SiYuan is the old
+    // block taken back.
+    let replaced = true;
+    if (options.replaceEntry && annotationKey) {
+      replaced = await this._replacePrevious(
+        options.replaceEntry,
+        annotationKey,
+        options.doc || null,
+      );
+      // `_replacePrevious` forgets the old entry; the index has to point at
+      // the new block either way — when the deletion failed, that is what
+      // keeps the marker from leading to the note the user just replaced.
+      if (blockID) {
+        this._index.add(annotationKey, blockID, {
+          documentID,
+          blocks: Array.isArray(sent.blocks) && sent.blocks.length
+            ? sent.blocks
+            : [blockID],
+          markdown,
+        });
+      }
+    }
+
+    return {
+      transport,
+      blockID,
+      notebook,
+      markdown,
+      documentID,
+      destination,
+      replaced,
+    };
+  },
+
+  /**
+   * Take the note of a previous send back.
+   *
+   * The index remembers the blocks and the Markdown of the send that wrote
+   * it, so the blocks and their pictures can be removed. After a restart
+   * only the anchor block is known; its siblings are recovered from the
+   * creation second by `_sentBlockRows`.
+   *
+   * @param {Object} entry - what the index knew about the old note
+   * @param {String} annotationKey
+   * @param {Object} [doc] - the reader document, so its marker goes too
+   * @returns {Promise<Boolean>} whether the old blocks were deleted
+   */
+  async _replacePrevious(entry, annotationKey, doc = null) {
+    if (!entry || !entry.blockID) {
+      return true;
+    }
+    const rows = await this._sentBlockRows(entry);
+    const markdown = [entry.markdown || ""]
+      .concat(rows.map((row) => row.markdown || ""))
+      .join("\n");
+    const deleted = await this._deleteBlocks(rows.map((row) => row.id));
+
+    // The pictures this note brought along, and only those: a picture the
+    // user added by hand does not carry the plugin's name.
+    const workspace = await this._resolveWorkspaceDir().catch(() => "");
+    if (workspace) {
+      for (const name of pictureAssetNames(markdown)) {
+        if (name.startsWith("zotero-siyuan-")) {
+          await removePicture(pictureFile(workspace, `assets/${name}`));
+        }
+      }
+    }
+
+    this._index.remove(annotationKey);
+    // The marker points at a block that is gone. Removing it now is what
+    // makes the marker of the new note appear in its place.
+    this._removeSentMarker(doc, annotationKey);
+    this._indexedAttachments.clear();
+    if (!deleted) {
+      Zotero.logError(
+        "ZoteroSiYuan: the old note could not be deleted — both notes are " +
+          "in SiYuan now.",
+      );
+    }
+    return deleted;
   },
 
   /**
@@ -269,7 +547,11 @@ export default {
         title: getString("zoteroSiYuan-toast-title", "Sent to SiYuan"),
         message: result.notebook
           ? `${result.notebook.name} · ${result.transport}`
-          : result.transport,
+          : `${
+            (result.destination && result.destination.title) ||
+            result.documentID ||
+            "SiYuan"
+          } · ${result.transport}`,
         link: siyuanBlockLink(result.blockID),
         linkLabel: getString("zoteroSiYuan-toast-open", "Open in SiYuan"),
         onLink: result.blockID
@@ -279,227 +561,6 @@ export default {
     }
     catch (e) {
       Zotero.debug(`ZoteroSiYuan: could not show the notification: ${e}`);
-    }
-  },
-
-  /**
-   * How many of how many — the line of a batch that is under way.
-   *
-   * @param {Number} done
-   * @param {Number} total
-   * @returns {String}
-   */
-  _batchProgress(done, total) {
-    return getString(
-      "zoteroSiYuan-toast-batch-progress",
-      "Sending %d/%d…",
-    )
-      .replace("%d", String(done))
-      .replace("%d", String(total));
-  },
-
-  /**
-   * What a batch has to say when it is done.
-   *
-   * @param {Number} sent
-   * @param {Number} failed
-   * @returns {String}
-   */
-  _batchSummary(sent, failed) {
-    const parts = [
-      getString("zoteroSiYuan-toast-batch-sent", "%d sent").replace(
-        "%d",
-        String(sent),
-      ),
-    ];
-    if (failed) {
-      parts.push(
-        getString("zoteroSiYuan-toast-batch-failed", "%d failed").replace(
-          "%d",
-          String(failed),
-        ),
-      );
-    }
-    return parts.join(", ");
-  },
-
-  /**
-   * Which annotations of a batch did not go in, and why.
-   *
-   * "3 failed" tells the user nothing they can act on. The first few are
-   * named with their reason, so the usual causes — a locked workspace, a
-   * picture that could not be found — are visible without a log.
-   *
-   * @param {Object[]} failed - { key, message }
-   * @returns {String}
-   */
-  _batchFailureMessage(failed) {
-    const lines = failed.slice(0, 3).map((entry) =>
-      `${entry.key}: ${entry.message}`
-    );
-    if (failed.length > lines.length) {
-      lines.push(
-        getString("zoteroSiYuan-toast-batch-more", "…and %d more").replace(
-          "%d",
-          String(failed.length - lines.length),
-        ),
-      );
-    }
-    return lines.join("\n");
-  },
-
-  /**
-   * Send several annotations at once.
-   *
-   * One after another on purpose: every append is a process of its own, and
-   * two of them at a time would fight over the same daily note in SiYuan.
-   * The batch is not silent, though — one bubble says how far it is, and
-   * every annotation that goes in moves it on. What did not go in is named,
-   * and can be tried again without redoing the rest.
-   *
-   * @param {String[]} ids - the annotation keys
-   * @param {Object} reader - the reader tab
-   * @param {Object} doc - the reader document
-   */
-  async _sendMany(ids, reader, doc) {
-    return await this._trackInflight(
-      this._runSendMany(ids, reader, doc),
-    );
-  },
-
-  /** One batch, start to finish — see `_sendMany`. */
-  async _runSendMany(ids, reader, doc) {
-    const total = ids.length;
-    // The document of the reader, so the markers can be added right away.
-    const target = doc || this._readerDoc(reader);
-    if (this._shutDown) {
-      return;
-    }
-    if (this._sending) {
-      // Another send is still running — say so instead of doing nothing.
-      showToast({
-        doc: target,
-        title: getString("zoteroSiYuan-busy", "Sending…"),
-        message: getString("zoteroSiYuan-busy-hint", "Wait for it to finish."),
-      });
-      return;
-    }
-    this._sending = true;
-    // Everything below — including the progress bubble itself — runs inside
-    // the try: a bubble that cannot be shown (the reader was closed, the
-    // document is gone) must not leave the send lock held forever, which
-    // would make every later send say "busy" until Zotero restarts.
-    let progress = null;
-    let sent = 0;
-    const failedItems = [];
-    let lastBlock = "";
-    try {
-      this._setReaderBusy(target, true);
-      // The PDF and its parent item are the same for every annotation of the
-      // batch — looking them up once instead of once per annotation saves two
-      // library reads per note.
-      this._batchMemo = {
-        attachments: new Map(),
-        parents: new Map(),
-      };
-      // No timeout: the bubble goes away when the batch says it is done.
-      progress = showToast({
-        doc: target,
-        title: getString("zoteroSiYuan-busy", "Sending…"),
-        message: this._batchProgress(0, total),
-        timeout: 0,
-      });
-      // The annotation items are read in the background, a few at a time,
-      // so the first note does not wait for the whole list and the loop
-      // below does not read them one after another.
-      const items = this._prefetchAnnotationItems(ids);
-      for (const id of ids) {
-        try {
-          const item = await items.get(id);
-          if (!item) {
-            failedItems.push({
-              key: id,
-              message: getString(
-                "zoteroSiYuan-toast-missing-annotation",
-                "the annotation is no longer in the library",
-              ),
-            });
-            continue;
-          }
-          const annotation = await this._annotationFromItem(item);
-          const result = await this._sendAnnotation(annotation, reader);
-          sent++;
-          if (result.blockID) {
-            lastBlock = result.blockID;
-          }
-        }
-        catch (e) {
-          failedItems.push({
-            key: id,
-            message: String((e && e.message) || e).split("\n")[0],
-          });
-          Zotero.logError(`ZoteroSiYuan: ${e}`);
-        }
-        finally {
-          if (progress) {
-            progress.update({
-              message: this._batchProgress(sent + failedItems.length, total),
-            });
-          }
-        }
-      }
-      // The markers show up right away, like they do for a single send.
-      if (target) {
-        this._updateRenderedMarkers(target);
-      }
-      const done = {
-        title: getString("zoteroSiYuan-toast-batch-title", "Sent to SiYuan"),
-        message: this._batchSummary(sent, failedItems.length),
-        link: siyuanBlockLink(lastBlock),
-        linkLabel: getString("zoteroSiYuan-toast-open", "Open in SiYuan"),
-        onLink: lastBlock ? () => this._openInSiYuan(lastBlock) : null,
-        timeout: 9000,
-      };
-      if (progress) {
-        progress.update(done);
-      }
-      else {
-        showToast({ doc: target, ...done });
-      }
-      // A failure that is only counted cannot be acted on. This bubble
-      // stays, names the annotations, and offers the retry.
-      if (failedItems.length) {
-        try {
-          showToast({
-            doc: target,
-            title: getString(
-              "zoteroSiYuan-toast-batch-failed-title",
-              "Not everything was sent",
-            ),
-            message: this._batchFailureMessage(failedItems),
-            link: "",
-            linkLabel: getString(
-              "zoteroSiYuan-toast-batch-retry",
-              "Retry the failed ones",
-            ),
-            onLink: () =>
-              this._sendMany(
-                failedItems.map((entry) => entry.key),
-                reader,
-                target,
-              ),
-            timeout: 0,
-          });
-        }
-        catch (e) {
-          Zotero.debug(`ZoteroSiYuan: could not report the failures: ${e}`);
-        }
-      }
-    }
-    finally {
-      this._sending = false;
-      this._batchMemo = null;
-      this._setReaderBusy(target, false);
     }
   },
 

@@ -112,20 +112,24 @@ reader 画注释 header
 点击按钮 → _send(annotation, reader, button)
    ├─ _takeSendHooks()                自检的钩子只作用于它自己那次点击
    ├─ this._sending 已置位？→ 提示"发送中"
+   ├─ 已发送检查（_index.getEntry）   ask / skip / send / replace，见第 4.5 节
    ├─ _sendAnnotation(...)
    │    ├─ _resolveNotebook()          先定笔记本：这一步失败时还没写任何图片
-   │    ├─ _buildContent(...)          ← 见下
-   │    ├─ _append(notebookID, md)     CLI 写日记，失败走 HTTP
-   │    ├─ 索引 add(annotationKey → blockID)
-   │    └─ 返回 { transport, blockID, notebook, markdown }
+   │    │                             （固定文档目标不需要笔记本）
+   │    ├─ _buildVars(...)             图片落盘 + 模板变量
+   │    ├─ _resolveDestination(...)    日记 / 指定文档 / 每篇文献一篇
+   │    ├─ _buildContent(..., {vars})  渲染模板
+   │    ├─ _append(notebookID, md, …)  CLI 写目标文档，失败走 HTTP
+   │    ├─ 索引 add(annotationKey → blockID, details)
+   │    └─ 返回 { transport, blockID, notebook, documentID, markdown }
    ├─ _flash(按钮,"已发送") + toast（带"在思源中打开"）
    └─ _updateRenderedMarkers(doc)      不用重开 PDF，↗ 立刻出现
 ```
 
-顺序是**笔记本在前、图片在后**：图片一旦落进 workspace 就属于那个 workspace，而笔记本是在
-`_append` 时才确定的。先定笔记本，解析失败就什么也没写，不会留下一张孤儿图片。
+顺序是**位置在前、图片在后**：图片一旦落进 workspace 就属于那个 workspace，而写进哪个文档要先
+解析成功。先定位置，解析失败就什么也没写，不会留下一张孤儿图片。
 
-### `_buildContent` 里发生了什么
+### 正文是怎么来的
 
 ```
 _getAttachment(reader)        正在看的这个 PDF（一次查询，下面还要用它）
@@ -134,23 +138,28 @@ _getParentItem(reader, hooks, attachment)
 _resolveAnnotationKey(...)    注释 key（索引的主键）
 _preparePicture(annotation, key)
                               框选注释才有：把图放进 workspace，返回 Markdown
-collectMetadata({...})        拍平成模板变量表
+collectMetadata({...})        拍平成模板变量表            ← _buildVars
 renderTemplate(模板, vars)    {{var}} / {{#if}} 渲染
-appendPicture(text, image)    图片 Markdown 插到正文
+appendPicture(text, image)    图片 Markdown 插到正文        ← _buildContent
 ```
+
+变量先收集、后渲染：目标位置（「每篇文献一个文档」的标题）也要用同一份变量，两边不能各算一次。
 
 ### 一次写入要 spawn 几个进程
 
 `siyuan` CLI 每次启动约 **0.6 秒**（实测 Windows / SiYuan 3.8.9），所以进程数就是延迟：
 
-| 步骤 | 之前 | 现在 |
+| 步骤 | 单条发送 | 批量发送（N 条） |
 |---|---|---|
-| `dailynote create` | 每次发送 | **每个「笔记本 + 当天」一次**（`dailyNoteDocument()` 记住；写失败会重建一次） |
-| `block append` | 每次发送 | 每次发送（这一条给出真正的块 id，必须跑） |
-| `sql`（写前/写后各一次，取差集） | 每次发送 | 只有自检要清理时才跑（`collectBlocks`） |
-| **合计** | **3 次 ≈ 1.8 秒** | **1 次 ≈ 0.65 秒** |
+| `dailynote create` | **每个「笔记本 + 当天」一次**（`dailyNoteDocument()` 记住；写失败会重建一次） | 一次 |
+| `block append` | 每次发送一次（这一条给出真正的块 id，必须跑） | **一次**（整批合并） |
+| `sql`（写前/写后各一次，取差集） | 只有自检要清理时才跑（`collectBlocks`） | 一次（分组要用块行） |
+| **合计** | **≈ 1 次进程** | **≈ 2 次进程**（不再乘 N） |
 
-批量发送是逐条串行的（顺序即日记里的顺序），所以 20 条注释从约 37 秒降到约 13 秒。
+批量写入的上限不再是 N 个进程，而是一次 `block append`。N 条笔记在同一个 `created` 秒里，
+所以每条末尾带一条不可见的零宽链接（`zsi=batch`）；写入后按 `sort` 顺序把块分组，
+每组记进索引。重启后索引只剩锚点块，替换时用同一批块里的**前一个锚点**找回这条笔记的边界，
+不会把整批都删掉。
 
 ### 失败时最重要的三件事
 
@@ -165,16 +174,52 @@ appendPicture(text, image)    图片 Markdown 插到正文
 
 ### 批量发送
 
-右键注释 → `createAnnotationContextMenu` → `_sendMany(ids, reader, doc)`：逐条走同一个
-`_sendAnnotation`，一条失败不影响其余，最后用一个 toast 报"N 条成功 / M 条失败"，
-并把所有 ↗ 一次性补到屏幕上。
+右键注释 → `createAnnotationContextMenu` → `_sendMany(ids, reader, doc)`。
+
+和单条走同一套渲染，但**只写一次**：
+
+1. 逐条解析注释、读条目（`_prefetchAnnotationItems` 后台并发读），已发送的按偏好跳过并计数；
+2. 每条调用 `_buildVars` + `_buildContent`，并在末尾追加零宽锚点
+   `[​](zotero://…&zsi=batch)`；
+3. 解析一次目标位置（「每篇文献一个文档」下所有注释属于同一篇文献，所以是同一个文档）；
+4. 所有正文用 `\n\n` 连起来，走一次 `_append(..., { collectBlocks: true })`；
+5. 写入返回的顶层块按 `sort` 排序，锚点结束自己那条笔记，前一个锚点之后到它之间就是这条
+   笔记的块；每组的块 id 和 Markdown 都记进索引；
+6. 需要「替换上次」的，在新写入成功之后再删旧块，旧的 ↗ 标记先摘掉。
 
 失败不是只给个数字：气泡里列出前几条的 key 和原因，并提供"重试失败的那几条"。整个批量
 （包括进度气泡本身）在 `try/finally` 里，所以阅读器被关掉、气泡画不出来时，`_sending`
 仍然会释放——否则之后每次发送都只会得到"正在发送"。
 
-注释 item 用 `_prefetchAnnotationItems` 后台并发读取，循环里按顺序取答案：批量不会为每条
-注释串行等一次库读取。
+一张图片只在建它那条笔记时落盘；整批写失败（且不是 `writeState: "unknown"`）时，
+`_batchPictures` 里所有图片一起收回，而不是只收最后一张。
+
+---
+
+## 4.5 目标位置与"已经发过"
+
+`destination.js` 只回答一个问题：**这次写到哪个文档**。
+
+| 设置 | 解析方式 | 需要的命令行 |
+|---|---|---|
+| `daily` | 不变，交给 `dailynote create` + `block append` | 0（复用当天缓存） |
+| `document` | 填块 ID 直接用；填标题先 `sql` 查 `type='d' AND content=…` | 0–1 次 |
+| `item` | 先按 `custom-zotero-item-key` 找文档，找不到按标题找，再找不到 `document create` + `attr set` | 1–2 次 |
+
+固定文档目标**不要求笔记本设置有效**：它有自己的文档 ID，`_resolveNotebook()` 根本不必跑。
+「每篇文献一个文档」的标题用和正文同一份模板变量渲染，所以 `{{title}}` 和正文里指的是同一篇。
+
+已发送检查发生在任何渲染/进程之前：`_index.getEntry(annotationKey)`。行为由偏好
+`sentAction` 决定：
+
+- `ask` —— 气泡里给「打开已有 / 仍然发送 / 替换上次」三个按钮；选择后重新进入 `_send`，
+  但带上 `alreadySent`，不会再问第二次；
+- `skip` —— 提示一下并返回；
+- `send` / `replace` —— 直接继续。
+
+`replace` 的顺序是**先写新、再删旧**：新笔记写失败时旧的原样保留；只有新块已经拿到，
+才删旧块、删它带进来的 `zotero-siyuan-*` 图片、摘掉旧 ↗，再把索引指到新块。
+批量里 `ask` 不会逐条弹窗，按 `skip` 处理并在汇总里报"跳过 N 条"。
 
 ---
 
@@ -233,8 +278,9 @@ pictureMarkdown(assetPath, alt)      生成 ![](assets/…) 插入正文
 **用户保存的模板**（`template-store.js`，纯函数，不碰 Zotero）：
 
 ```
-偏好 templates = [{ id, name, template }, …]（JSON 字符串，上限 50）
-   saveTemplate( shelf, { id?, name?, template? } )
+偏好 templates = [{ id, name, template, destination?, targetDocument?,
+                    itemDocName?, itemDocPath? }, …]（JSON 字符串，上限 50）
+   saveTemplate( shelf, { id?, name?, template?, …destination } )
      id 命中          → 更新那一份（给了名字就顺便改名）
      名字命中          → 更新同名的那一份（不会堆出副本）
      都没有            → 新建一份，追加到末尾
@@ -244,6 +290,10 @@ pictureMarkdown(assetPath, alt)      生成 ![](assets/…) 插入正文
 - `parseSavedTemplates()` 对一切手改坏的偏好都返回空列表：非法 JSON、不是数组、
   缺 `template`、缺 `id`（补一个）、`id` 重复（第二个换一个）—— 面板不会因为一个
   偏好打不开。
+- 模板可以**带上目的地**（`destination` / `targetDocument` / `itemDocName` / `itemDocPath`）。
+  套用一份模板时这几个字段一并写进偏好，所以"发到某篇文献的笔记"可以一键切换；
+  没带目的地的旧模板照常工作，只是不改目的地。字段只在是非空字符串时才存，读的时候
+  缺失的键自然回落到当前偏好——模板不会用一个空串把用户的全局设置清掉。
 - 面板侧：下拉列表 + 名字框 + 保存/套用/删除；**删除按两次**（`_deleteArm`），
   换一份就把待删状态收回去；列表为空时「套用」「删除」置灰。
 - 自检（`ui: true`）真的存一份、套回来、删掉，最后把 `templates` 偏好原样写回。
@@ -254,7 +304,8 @@ pictureMarkdown(assetPath, alt)      生成 ![](assets/…) 插入正文
 
 ```
 SiYuanProcess          找可执行文件、试路径、跑进程、超时、读懂输出
-   └─ SiYuanCLI        业务：notebook list / dailynote create / block append / sql / delete
+   └─ SiYuanCLI        业务：notebook list / dailynote create / block append / block delete /
+                       sql / document create / document search / attr set
 SiYuanHTTP             直接打内核 API（读 conf.json 拿 token 和端口，自动发现）
 ```
 
@@ -267,6 +318,10 @@ siyuan block append --parent <文档 id> --file <md>  → { "id": "<块 id>" }
 
 旧版 CLI 没有 `block append`，才退回 `dailynote append`（它只回文档 id，块 id 靠 `created`
 秒去查）。**注意**：如果命令超时或"可能已经写了"，一律不退回重试，否则会写两遍。
+
+写到指定文档时少一步：文档已经有了，直接 `block append --parent <该文档>`。
+「每篇文献一个文档」还要先找到（`sql` 按 `custom-zotero-item-key` 查 `ial`）或建出
+（`document create` + `attr set`）那篇文档，这一步在写入之前完成，失败时什么都没写。
 
 ---
 
@@ -316,8 +371,9 @@ Zotero 把 `scripts` 数组里的文件**按顺序加载进同一个面板作用
 6. 自检**不得改变**真实发送的行为：钩子只挂一次、只被一次点击取走。
 7. 面板脚本的顺序 = 注册顺序，boot 必须最后。
 8. 插件对象只有一个（`Zotero.ZoteroSiYuan`），`app/` 的新模块必须 `Object.assign` 进原型。
-9. **一次发送最多 spawn 一个进程**（`block append`）。任何"顺手查一下"的 CLI 调用都要先想
-   清楚它是不是每次发送都必要——一次 0.6 秒，批量发送里是乘上去的。
+9. **一次发送最多 spawn 一个进程**（`block append`），批量发送**合并成一次 `block append`**
+   （外加分组时最多一次 `sql`）。任何"顺手查一下"的 CLI 调用都要先想清楚它是不是每次发送
+   都必要——一次 0.6 秒，批量不再乘上去，但单条发送仍然会被它拖慢。
 10. **侧栏每次渲染 header 的代码不能做全文档查询**。一个 PDF 几百条注释，一次渲染就是
     几百次查询；手动标记走 `_manualLinksOf` 的 `WeakMap`，不要退回 `querySelectorAll`。
 11. **异步调用必须 `await`**。`IOUtils.exists()` / `Zotero.Items.getAsync()` 这类返回的是
@@ -352,8 +408,10 @@ Zotero 把 `scripts` 数组里的文件**按顺序加载进同一个面板作用
 - 手动标记（`data-zsi-manual`）按文档建了 `WeakMap`，每个文档只扫一次 DOM；代价是插件
   被重载后由**旧实例**插入的标记要靠那次扫描找回来——扫描用 `isConnected` 兜底，找不到
   就当它已经被 reader 擦掉了。
-- 批量发送仍是**串行**的：一次发送一个进程（约 0.65 秒），两条同时写会抢同一篇日记。
-  所以 12 条注释大约要 8 秒——这期间气泡显示进度，阅读器里所有发送按钮置灰。
+- 批量发送**合并成一次写入**：12 条注释是一个 `block append`，不再串行等 12 个进程。
+  代价是它们落在同一秒里，重启后"这次写入的块"无法再用创建时间区分，只能靠每篇末尾那个
+  不可见锚点（`zsi=batch`）从后往前切分；锚点丢失时只有第一条能确定归属，其余的不进索引
+  （宁可让用户再发一次，也不要把标记打到别人的笔记上）。
 - 压缩后的图片在内存里留一份（最多 12 张 / 32 MB），所以"同一张图再发一次"不必重新
   解码 + 重编码。代价是插件退出前占着这些内存（`forgetPictures()` 在 `onShutdown` 里清）。
 - 预览气泡显示在**调用方给的文档**里（阅读器发送就弹在阅读器里）；如果那次发送来自

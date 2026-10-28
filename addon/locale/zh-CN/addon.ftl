@@ -14,10 +14,21 @@ toast-batch-title = 已发送到思源笔记
 toast-batch-progress = 正在发送 %d/%d…
 toast-batch-sent = 已发送 %d 条
 toast-batch-failed = %d 条失败
+toast-batch-skipped = 跳过 %d 条（已经发过）
 toast-batch-failed-title = 有部分内容没能发送
 toast-batch-retry = 重试失败的那几条
 toast-batch-more = 还有 %d 条
 toast-missing-annotation = 这条注释已不在文库中
+
+already-sent-title = 这条注释已经发过了
+already-sent-message = 已经发送到思源。要打开已有那条，还是再发一条 / 替换上次那条？
+already-sent-open = 打开已有
+already-sent-send = 仍然发送
+already-sent-replace = 替换上次
+already-sent-skipped = 这条注释已经发送过，已跳过。
+no-target-document = 设置里没有指定目标文档。
+target-document-not-found = 找不到标题为「%s」的文档。
+item-document-failed = 无法为这篇文献创建思源文档：%s
 menu-send-one = 发送到思源笔记
 menu-send-many = 把 %d 条注释发送到思源笔记
 

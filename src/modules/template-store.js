@@ -43,6 +43,43 @@ export const SAVE_ERRORS = {
 };
 
 /**
+ * The destination settings a template may carry.
+ *
+ * A template is not only how a note looks — it is also often meant for a
+ * particular place ("one document per paper", "my reading log"). Saving
+ * those settings with it means loading the template restores both.
+ */
+export const DESTINATION_FIELDS = [
+  "destination",
+  "targetDocument",
+  "itemDocName",
+  "itemDocPath",
+];
+
+/** The destination values of an entry, without the empty ones. */
+function destinationOf(entry) {
+  const values = {};
+  if (!entry || typeof entry !== "object") {
+    return values;
+  }
+  for (const name of DESTINATION_FIELDS) {
+    const raw = entry[name];
+    if (typeof raw !== "string") {
+      continue;
+    }
+    const value = raw.trim();
+    if (!value) {
+      continue;
+    }
+    if (name === "destination" && !["daily", "document", "item"].includes(value)) {
+      continue;
+    }
+    values[name] = value;
+  }
+  return values;
+}
+
+/**
  * An id for a template.
  *
  * It only has to be different from every other id on the shelf — nobody
@@ -117,7 +154,9 @@ export function nameFromTemplate(template) {
  * there is nothing to load from it.
  *
  * @param {String} raw - the preference
- * @returns {Array<{id: String, name: String, template: String}>}
+ * @returns {Array<{id: String, name: String, template: String,
+ *   destination?: String, targetDocument?: String, itemDocName?: String,
+ *   itemDocPath?: String}>}
  */
 export function parseSavedTemplates(raw) {
   let parsed;
@@ -150,7 +189,7 @@ export function parseSavedTemplates(raw) {
     seen.add(id);
     const name =
       cleanTemplateName(entry.name, nameFromTemplate(template)) || id;
-    list.push({ id, name, template });
+    list.push({ id, name, template, ...destinationOf(entry) });
     if (list.length >= MAX_SAVED_TEMPLATES) {
       break;
     }
@@ -173,6 +212,7 @@ export function serializeSavedTemplates(list) {
     id: String((entry && entry.id) || ""),
     name: String((entry && entry.name) || ""),
     template: String((entry && entry.template) || ""),
+    ...destinationOf(entry),
   }));
   return JSON.stringify(entries);
 }
@@ -244,7 +284,12 @@ export function saveTemplate(list, entry = {}) {
 
   const byId = findSavedTemplate(current, id);
   if (byId) {
-    const updated = { id: byId.id, name: name || byId.name, template };
+    const updated = {
+      id: byId.id,
+      name: name || byId.name,
+      template,
+      ...destinationOf(entry),
+    };
     return {
       list: current.map((item) => (item && item.id === byId.id ? updated : item)),
       entry: updated,
@@ -255,7 +300,12 @@ export function saveTemplate(list, entry = {}) {
 
   const byName = savedTemplateByName(current, name);
   if (byName) {
-    const updated = { id: byName.id, name: byName.name, template };
+    const updated = {
+      id: byName.id,
+      name: byName.name,
+      template,
+      ...destinationOf(entry),
+    };
     return {
       list: current.map((item) => (item && item.id === byName.id ? updated : item)),
       entry: updated,
@@ -270,7 +320,12 @@ export function saveTemplate(list, entry = {}) {
   if (current.length >= MAX_SAVED_TEMPLATES) {
     return { list: current, entry: null, created: false, error: SAVE_ERRORS.limit };
   }
-  const created = { id: newTemplateId(current), name, template };
+  const created = {
+    id: newTemplateId(current),
+    name,
+    template,
+    ...destinationOf(entry),
+  };
   return {
     list: current.concat([created]),
     entry: created,

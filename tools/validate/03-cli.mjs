@@ -310,7 +310,9 @@ section("The write path names its block");
       extractAppendResult(null).blockID === "",
   );
 
-  const cli = readFileSync(join(ROOT, "src", "modules", "siyuan.js"), "utf8");
+  const cli =
+    readFileSync(join(ROOT, "src", "modules", "siyuan.js"), "utf8") +
+    readFileSync(join(ROOT, "src", "modules", "siyuan-documents.js"), "utf8");
   check(
     "the CLI creates the daily note and then appends to it",
     cli.includes('"dailynote"') &&
@@ -334,7 +336,7 @@ section("The write path names its block");
   check(
     "the sibling blocks cost a process only when they are asked for",
     /collectBlocks = false/.test(cli) &&
-      /const blocks = collectBlocks\s*\?[\s\S]{0,80}newBlocksSince\(/.test(cli),
+      /const rows = collectBlocks\s*\?[\s\S]{0,80}newBlockRowsSince\(/.test(cli),
   );
   check(
     "only the blocks a write created are attributed to it",
@@ -346,7 +348,7 @@ section("The write path names its block");
       cli,
     ) &&
       /blocksExact/.test(cli) &&
-      /!known\.has\(id\)/.test(cli),
+      /!known\.has\(row\.id\)/.test(cli),
   );
   check(
     "a clean-up can tell whether its deletion took",

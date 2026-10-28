@@ -173,6 +173,54 @@ export default {
     return setPref("template", "");
   },
 
+  /* -------------------------------------------------- where a note goes */
+
+  /**
+   * The destination settings, as the pane shows them.
+   *
+   * A template can carry these, so the pane reads them before saving one
+   * and writes them back when one is loaded.
+   *
+   * @returns {{destination: String, targetDocument: String,
+   *   itemDocName: String, itemDocPath: String}}
+   */
+  getDestinationSettings() {
+    const value = String(getPref("destination", "daily") || "").trim();
+    return {
+      destination: ["daily", "document", "item"].includes(value)
+        ? value
+        : "daily",
+      targetDocument: String(getPref("targetDocument", "") || ""),
+      itemDocName: String(getPref("itemDocName", "{{title}}") || "{{title}}"),
+      itemDocPath: String(getPref("itemDocPath", "/") || "/"),
+    };
+  },
+
+  /**
+   * Put destination settings back — from a saved template.
+   *
+   * Only the known fields and known destination kinds are written, so a
+   * template that was edited by hand cannot put an arbitrary value into a
+   * preference the send path reads.
+   *
+   * @param {Object} settings
+   * @returns {{destination: String, targetDocument: String,
+   *   itemDocName: String, itemDocPath: String}}
+   */
+  applyDestinationSettings(settings = {}) {
+    const value = String((settings && settings.destination) || "").trim();
+    if (["daily", "document", "item"].includes(value)) {
+      setPref("destination", value);
+    }
+    for (const key of ["targetDocument", "itemDocName", "itemDocPath"]) {
+      const raw = settings && settings[key];
+      if (typeof raw === "string") {
+        setPref(key, raw);
+      }
+    }
+    return this.getDestinationSettings();
+  },
+
   /* ----------------------------------------------------- the user's shelf */
 
   /**

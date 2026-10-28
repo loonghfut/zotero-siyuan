@@ -16,6 +16,21 @@ pref-rescanning = 正在扫描思源…
 pref-rescanned = 已发送的注释
 pref-hint = 命令行路径留空会自动查找；工作空间留空则使用 siyuan 命令行当前的工作空间；笔记本留空则使用第一个笔记本。
 
+pref-destination-title = 发送到
+pref-destination = 目标位置
+pref-destination-daily = 今天的日记
+pref-destination-document = 指定文档
+pref-destination-item = 每篇文献一个文档
+pref-target-document = 文档标题或 ID
+pref-item-doc-name = 新文档的标题（可用模板变量）
+pref-item-doc-path = 放在哪个路径下（例如 /读书）
+pref-sent-action = 已经发过的注释
+pref-sent-action-ask = 每次问我
+pref-sent-action-skip = 跳过
+pref-sent-action-send = 再发一条
+pref-sent-action-replace = 替换上次
+pref-destination-hint = 默认写到今天的日记。选「指定文档」时填文档标题或块 ID；选「每篇文献一个文档」时，会在所选笔记本里为这篇文献建一个文档，并用 custom-zotero-item-key 记住它，下次直接写进去。保存模板时会把这里的目标位置一起存下来，套用模板时一并恢复。
+
 pref-picture-title = 框选图片
 pref-image-compress = 发送前压缩图片
 pref-image-quality = 压缩质量

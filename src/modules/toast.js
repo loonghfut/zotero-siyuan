@@ -56,6 +56,19 @@ const MESSAGE_STYLE =
 const LINK_STYLE =
 	"display:block;color:#7cc4ff;text-decoration:underline;cursor:pointer;font-size:12.5px;";
 
+const ACTIONS_STYLE =
+	"display:flex;flex-wrap:wrap;gap:8px;margin-top:2px;";
+
+const ACTION_STYLE =
+	"padding:5px 9px;border:1px solid #55555c;border-radius:5px;" +
+	"background:transparent;color:#f4f4f5;cursor:pointer;font:inherit;" +
+	"font-size:12.5px;";
+
+const ACTION_PRIMARY_STYLE =
+	"padding:5px 9px;border:1px solid transparent;border-radius:5px;" +
+	"background:#4a7dff;color:#fff;cursor:pointer;font:inherit;" +
+	"font-size:12.5px;";
+
 const CLOSE_STYLE =
 	"position:absolute;top:6px;right:8px;color:#bbb;cursor:pointer;font-size:14px;line-height:1;";
 
@@ -131,6 +144,8 @@ export function toastTarget(doc = null) {
  * @param {String} options.linkLabel - the text of that link
  * @param {Number} options.timeout - how long it stays, in ms
  * @param {Function} options.onLink - called instead of opening the URL
+ * @param {Array} options.actions - buttons: { label, onClick, primary }
+ * @param {Function} options.onClose - called once when the bubble goes away
  * @param {Object} options.doc - the document to show it in
  * @param {Boolean} options.retry - try again shortly when there is no window
  * @returns {Object|null} { element, close, update }
@@ -142,6 +157,8 @@ export function showToast({
 	linkLabel = "",
 	timeout = 9000,
 	onLink = null,
+	actions = [],
+	onClose = null,
 	doc = null,
 	retry = true,
 } = {}) {
@@ -157,6 +174,8 @@ export function showToast({
 				linkLabel,
 				timeout,
 				onLink,
+				actions,
+				onClose,
 				doc,
 				retry: false,
 			};
@@ -198,6 +217,42 @@ export function showToast({
 		body.style.cssText = MESSAGE_STYLE;
 		body.textContent = message;
 		box.appendChild(body);
+	}
+
+	// A bubble that asks a question needs buttons the keyboard can reach —
+	// a div with a click handler is invisible to it.
+	if (Array.isArray(actions) && actions.length) {
+		const row = create("div");
+		row.style.cssText = ACTIONS_STYLE;
+		for (const entry of actions) {
+			if (!entry || !entry.label) {
+				continue;
+			}
+			const button = create("button");
+			button.type = "button";
+			button.textContent = String(entry.label);
+			button.style.cssText = entry.primary
+				? ACTION_PRIMARY_STYLE
+				: ACTION_STYLE;
+			button.addEventListener("click", (e) => {
+				e.preventDefault();
+				try {
+					if (entry.onClick) {
+						entry.onClick();
+					}
+				}
+				catch (err) {
+					Zotero.debug(`ZoteroSiYuan: the toast action failed: ${err}`);
+				}
+				if (entry.close !== false) {
+					close();
+				}
+			});
+			row.appendChild(button);
+		}
+		if (row.childElementCount) {
+			box.appendChild(row);
+		}
 	}
 
 	const closeButton = create("div");
@@ -277,6 +332,7 @@ export function showToast({
 
 	const later = win && win.setTimeout ? win.setTimeout.bind(win) : setTimeout;
 	let timer = null;
+	let closed = false;
 	// The stack goes with its last bubble — an empty fixed element in the
 	// corner is harmless but it is still litter.
 	const dropStack = () => {
@@ -289,9 +345,21 @@ export function showToast({
 		}
 	};
 	function close() {
+		if (closed) {
+			return;
+		}
+		closed = true;
 		if (timer) {
 			clearTimeout(timer);
 			timer = null;
+		}
+		try {
+			if (onClose) {
+				onClose();
+			}
+		}
+		catch (e) {
+			// The caller's cleanup must not keep the bubble on screen.
 		}
 		try {
 			box.style.opacity = "0";

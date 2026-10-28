@@ -219,6 +219,93 @@ export class SiYuanHTTP {
   }
 
   /**
+   * Append Markdown to a document.
+   *
+   * The endpoint is the same operation the CLI's `block append` uses; its
+   * answer is an array of transactions, so the id is read out of it.
+   *
+   * @param {String} parentID - the document (or block) to append to
+   * @param {String} markdown
+   * @returns {Promise<{blockID: String, documentID: String}>}
+   */
+  async appendBlock(parentID, markdown) {
+    let data;
+    try {
+      data = await this.request("/api/block/appendBlock", {
+        parentID,
+        dataType: "markdown",
+        data: markdown,
+      });
+    }
+    catch (e) {
+      if (e && e.refused) {
+        throw e;
+      }
+      const error = new Error(e && e.message ? e.message : String(e));
+      error.writeState = "unknown";
+      error.written = true;
+      throw error;
+    }
+    return extractAppendResult(data);
+  }
+
+  /**
+   * Create a document with Markdown.
+   *
+   * The legacy `createDocWithMd` endpoint is refused by a notebook that
+   * uses structured titles (`legacyPathUnsupported`). The CLI path handles
+   * that; this fallback is only reached when the CLI cannot run at all.
+   *
+   * @param {String} notebookID
+   * @param {String} parentPath - e.g. "/"
+   * @param {String} title
+   * @param {String} [markdown]
+   * @returns {Promise<String>} the document id
+   */
+  async createDocument(notebookID, parentPath, title, markdown = "") {
+    const parent = String(parentPath || "/").trim() || "/";
+    const path = `${parent.replace(/\/+$/, "")}/${title}`;
+    const data = await this.request("/api/filetree/createDocWithMd", {
+      notebook: notebookID,
+      path,
+      markdown: String(markdown || ""),
+    });
+    const id = typeof data === "string"
+      ? data.trim()
+      : data && (data.id || data.ID) || "";
+    if (!blockIDOf(id)) {
+      throw new Error(
+        `SiYuan did not answer with a document id: ${JSON.stringify(data).slice(0, 200)}`,
+      );
+    }
+    return blockIDOf(id);
+  }
+
+  /**
+   * Set custom attributes on a block or document.
+   *
+   * @param {String} id
+   * @param {Object} attrs - name → value
+   * @returns {Promise<void>}
+   */
+  async setBlockAttrs(id, attrs) {
+    await this.request("/api/attr/setBlockAttrs", {
+      id,
+      attrs: attrs || {},
+    });
+  }
+
+  /**
+   * Delete one block.
+   *
+   * @param {String} id
+   * @returns {Promise<void>}
+   */
+  async deleteBlock(id) {
+    await this.request("/api/block/deleteBlock", { id });
+  }
+
+  /**
    * Resolve the notebook that should receive the daily note.
    * @param {string} wanted - notebook name or id; empty = first usable one
    */

@@ -48,6 +48,120 @@ Object.assign(ZoteroSiYuanPreferences, {
     await this._runOnce(this._test);
   },
 
+  /* ------------------------------------------------- where a note goes */
+
+  /**
+   * Show the destination settings the plugin really has.
+   *
+   * The inputs with a `preference` attribute are bound by Zotero, but the
+   * two dropdowns are not — and a template that was just loaded has to be
+   * reflected without reopening the pane.
+   */
+  _restoreDestinationSettings: function () {
+    var addon = Zotero.ZoteroSiYuan;
+    if (!addon || !addon.getDestinationSettings) {
+      return;
+    }
+    var settings = addon.getDestinationSettings();
+    var destination = document.getElementById(this.DESTINATION_ID);
+    if (destination) {
+      destination.value = settings.destination;
+    }
+    var target = document.getElementById(this.TARGET_DOCUMENT_ID);
+    if (target) {
+      target.value = settings.targetDocument;
+    }
+    var name = document.getElementById(this.ITEM_DOC_NAME_ID);
+    if (name) {
+      name.value = settings.itemDocName;
+    }
+    var path = document.getElementById(this.ITEM_DOC_PATH_ID);
+    if (path) {
+      path.value = settings.itemDocPath;
+    }
+    var sent = document.getElementById(this.SENT_ACTION_ID);
+    if (sent) {
+      sent.value = String(addon.getPref("sentAction", "ask") || "ask");
+    }
+    this._syncDestinationFields();
+  },
+
+  /** Only the fields the chosen destination actually uses. */
+  _syncDestinationFields: function () {
+    var select = document.getElementById(this.DESTINATION_ID);
+    var kind = select ? String(select.value || "daily") : "daily";
+    var targetRow = document.getElementById(this.TARGET_DOCUMENT_ROW_ID);
+    var itemRow = document.getElementById(this.ITEM_DOC_ROW_ID);
+    if (targetRow) {
+      targetRow.style.display = kind === "document" ? "" : "none";
+    }
+    if (itemRow) {
+      itemRow.style.display = kind === "item" ? "" : "none";
+    }
+  },
+
+  /** The destination dropdown changed. */
+  _saveDestination: function (value) {
+    var addon = Zotero.ZoteroSiYuan;
+    if (addon && addon.setPref) {
+      addon.setPref("destination", String(value || "daily"));
+    }
+    this._syncDestinationFields();
+  },
+
+  /** What a click on an already-sent annotation does. */
+  _saveSentAction: function (value) {
+    var addon = Zotero.ZoteroSiYuan;
+    if (addon && addon.setPref) {
+      addon.setPref("sentAction", String(value || "ask"));
+    }
+  },
+
+  /**
+   * Where the notes of the template in the editor go.
+   *
+   * The pane does not read preferences itself — the plugin owns them — so
+   * the settings are asked for before a template is saved.
+   *
+   * @returns {Object}
+   */
+  _destinationSettings: function () {
+    var addon = Zotero.ZoteroSiYuan;
+    return addon && addon.getDestinationSettings
+      ? addon.getDestinationSettings()
+      : {};
+  },
+
+  /**
+   * Take the destination a loaded template carries.
+   *
+   * A template saved before destinations existed carries none, and then
+   * the current setting is left alone.
+   *
+   * @param {Object} entry - a saved template
+   * @returns {Boolean} whether a destination was applied
+   */
+  applyTemplateDestination: function (entry) {
+    var addon = Zotero.ZoteroSiYuan;
+    if (!entry || !addon || !addon.applyDestinationSettings) {
+      return false;
+    }
+    var fields = ["destination", "targetDocument", "itemDocName", "itemDocPath"];
+    var found = false;
+    for (var i = 0; i < fields.length; i++) {
+      if (entry[fields[i]]) {
+        found = true;
+        break;
+      }
+    }
+    if (!found) {
+      return false;
+    }
+    addon.applyDestinationSettings(entry);
+    this._restoreDestinationSettings();
+    return true;
+  },
+
   /**
    * Rebuild the list of the annotations that have been sent.
    *

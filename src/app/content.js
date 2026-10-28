@@ -27,22 +27,37 @@ import {
 
 export default {
   /**
-   * Render the template for an annotation.
+   * Collect the values the template is rendered with.
+   *
+   * A batch needs the same values twice — once to decide where its notes go
+   * (a document per item is named after the item) and once to render them.
+   * Keeping the collection here means the second use costs nothing and the
+   * two cannot disagree.
+   *
+   * @param {Object} annotation - the reader's annotation model
+   * @param {Object} reader - the reader tab
    * @param {Object} [hooks] - what the self test watches this render with
-   * @returns {Promise<String>} the Markdown
+   * @param {Object} [known]
+   * @param {Object} [known.attachment] - the PDF, when the caller has it
+   * @param {String} [known.annotationKey] - the annotation key, when known
+   * @returns {Promise<Object>} the template variables
    */
-  async _buildContent(annotation, reader, hooks = null) {
+  async _buildVars(annotation, reader, hooks = null, known = {}) {
     // The attachment is needed twice — as the PDF the picture belongs to and
     // as the way to the item that holds the metadata — so it is looked up
     // once and passed on.
-    const attachment = await this._getAttachment(reader);
+    const attachment = Object.prototype.hasOwnProperty.call(known, "attachment")
+      ? known.attachment
+      : await this._getAttachment(reader);
     const parentItem = await this._getParentItem(reader, hooks, attachment);
-    const annotationKey = await this._resolveAnnotationKey(annotation);
+    const annotationKey = known.annotationKey !== undefined
+      ? known.annotationKey
+      : await this._resolveAnnotationKey(annotation);
     // A "框选" annotation has no text — the selection is a picture, and
     // the picture is put into the workspace before the note is written.
     const image = await this._preparePicture(annotation, annotationKey);
     const annotationDate = await this._annotationDate(annotation);
-    const vars = collectMetadata({
+    return collectMetadata({
       annotation,
       parentItem,
       attachment,
@@ -51,13 +66,32 @@ export default {
       annotationDate,
       extra: this._now(),
     });
-    const { text, unknown } = renderTemplate(this.getTemplate(), vars);
+  },
+
+  /**
+   * Render the template for an annotation.
+   *
+   * @param {Object} annotation
+   * @param {Object} reader
+   * @param {Object} [hooks] - what the self test watches this render with
+   * @param {Object} [options]
+   * @param {Object} [options.vars] - values from `_buildVars`, when the
+   *   caller already has them
+   * @param {String} [options.template] - the template to use
+   * @returns {Promise<String>} the Markdown
+   */
+  async _buildContent(annotation, reader, hooks = null, options = {}) {
+    const vars = options.vars || (await this._buildVars(annotation, reader, hooks));
+    const { text, unknown } = renderTemplate(
+      options.template || this.getTemplate(),
+      vars,
+    );
     if (unknown.length) {
       Zotero.debug(
         `ZoteroSiYuan: the template uses variables that do not exist: ${unknown.join(", ")}`,
       );
     }
-    return appendPicture(text, image);
+    return appendPicture(text, vars.image || "");
   },
 
   /**
@@ -207,6 +241,11 @@ export default {
       // Remember where the picture went: a send that never reaches SiYuan
       // has to take it back.
       this._pendingPicture = { asset, file };
+      // A batch builds several notes before writing any of them — the one
+      // pointer would only remember the last picture.
+      if (Array.isArray(this._batchPictures)) {
+        this._batchPictures.push(this._pendingPicture);
+      }
       return pictureMarkdown(asset, alt);
     }
     catch (e) {
@@ -354,6 +393,32 @@ export default {
       return;
     }
     await removePicture(picture.file);
-  }
+  },
+
+  /**
+   * Take back every picture a batch put into the workspace.
+   *
+   * A batch builds all of its notes before it writes them, so a failure
+   * has several pictures to take back — not just the last one.
+   */
+  async _dropPictures() {
+    const pictures = Array.isArray(this._batchPictures)
+      ? this._batchPictures.slice()
+      : [];
+    this._batchPictures = null;
+    const pending = this._pendingPicture;
+    this._pendingPicture = null;
+    if (pending) {
+      pictures.push(pending);
+    }
+    const seen = new Set();
+    for (const picture of pictures) {
+      const file = picture && picture.file;
+      if (file && !seen.has(file)) {
+        seen.add(file);
+        await removePicture(file);
+      }
+    }
+  },
 
 };

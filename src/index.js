@@ -33,12 +33,14 @@ import {
 } from "./utils/prefs.js";
 
 import content from "./app/content.js";
+import destination from "./app/destination.js";
 import diagnosticsApi from "./app/diagnostics-api.js";
 import lookup from "./app/lookup.js";
 import preferencesApi from "./app/preferences-api.js";
 import readerMarks from "./app/reader-marks.js";
 import readerUi from "./app/reader-ui.js";
 import send from "./app/send.js";
+import sendBatch from "./app/send-batch.js";
 import transport from "./app/transport.js";
 
 class ZoteroSiYuanAddon {
@@ -86,6 +88,11 @@ class ZoteroSiYuanAddon {
     // the notebooks is a process per call, and nothing changes them while
     // the user is sending notes.
     this._notebookCache = null;
+    // The document a per-item destination lives in, by item key, and the
+    // fixed target document by title. Both are cheap to keep and expensive
+    // to look up — a title query is a full scan.
+    this._itemDocs = new Map();
+    this._documentCache = new Map();
     // Reader documents the plugin has seen a render event for. Their sidebar
     // is redrawn by the reader itself, and every redraw hands the plugin the
     // event again — so they never have to be patched by hand.
@@ -98,6 +105,9 @@ class ZoteroSiYuanAddon {
     // it was put. A send that never reaches SiYuan has to take it back —
     // the workspace belongs to the user.
     this._pendingPicture = null;
+    // The pictures a batch built before its single write. A batch has more
+    // than one, so the single pointer above is not enough to take them back.
+    this._batchPictures = null;
     // The SiYuan workspace the notes go into, and the HTTP fallback client.
     this._workspaceDir = "";
     this._workspaceKey = null;
@@ -276,8 +286,11 @@ class ZoteroSiYuanAddon {
     await this._waitForInflight(5000);
     this._pendingSendHooks = null;
     this._pendingPicture = null;
+    this._batchPictures = null;
     this._sending = false;
     this._batchMemo = null;
+    this._itemDocs.clear();
+    this._documentCache.clear();
     this._busyDocs = new WeakSet();
     // The compressed pictures are kept in memory for a faster second send;
     // a plugin that is gone has no business holding on to them.
@@ -321,12 +334,14 @@ class ZoteroSiYuanAddon {
 Object.assign(
   ZoteroSiYuanAddon.prototype,
   content,
+  destination,
   diagnosticsApi,
   lookup,
   preferencesApi,
   readerMarks,
   readerUi,
   send,
+  sendBatch,
   transport,
 );
 

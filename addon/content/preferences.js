@@ -45,6 +45,13 @@ var ZoteroSiYuanPreferences = {
   IMAGE_COMPRESS_ID: "zotero-prefpane-zoteroSiYuan-image-compress",
   IMAGE_QUALITY_ID: "zotero-prefpane-zoteroSiYuan-image-quality",
   IMAGE_QUALITY_RANGE_ID: "zotero-prefpane-zoteroSiYuan-image-quality-range",
+  DESTINATION_ID: "zotero-prefpane-zoteroSiYuan-destination",
+  TARGET_DOCUMENT_ID: "zotero-prefpane-zoteroSiYuan-target-document",
+  TARGET_DOCUMENT_ROW_ID: "zotero-prefpane-zoteroSiYuan-target-document-row",
+  ITEM_DOC_NAME_ID: "zotero-prefpane-zoteroSiYuan-item-doc-name",
+  ITEM_DOC_PATH_ID: "zotero-prefpane-zoteroSiYuan-item-doc-path",
+  ITEM_DOC_ROW_ID: "zotero-prefpane-zoteroSiYuan-item-doc-row",
+  SENT_ACTION_ID: "zotero-prefpane-zoteroSiYuan-sent-action",
 
   // The bounds of the compression quality. The value is the JPEG quality
   // in percent: 10 is small and rough, 100 is big and faithful.
@@ -188,6 +195,12 @@ var ZoteroSiYuanPreferences = {
       ) {
         this._setQuality(target.value);
       }
+      else if (target.id === this.DESTINATION_ID) {
+        this._saveDestination(target.value);
+      }
+      else if (target.id === this.SENT_ACTION_ID) {
+        this._saveSentAction(target.value);
+      }
     });
     // Remember where the caret was, so a variable can be inserted there even
     // though clicking the list takes the focus away from the editor.
@@ -297,6 +310,7 @@ var ZoteroSiYuanPreferences = {
     this._renderVariables(this._filteredVariables());
     this._renderConditionalVariables();
     this._restoreImageSettings();
+    this._restoreDestinationSettings();
     this._showProblems(help.template);
     this._refreshPreview();
   },

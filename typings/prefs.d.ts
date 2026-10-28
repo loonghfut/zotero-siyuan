@@ -10,6 +10,11 @@ declare namespace _ZoteroTypes {
       "cliPath": string;
       "workspace": string;
       "notebook": string;
+      "destination": string;
+      "targetDocument": string;
+      "itemDocName": string;
+      "itemDocPath": string;
+      "sentAction": string;
       "template": string;
       "templates": string;
       "imageCompress": string;

@@ -5,7 +5,11 @@
 import { getPref } from "../utils/prefs.js";
 import { NOTEBOOK_CACHE_MS, WORKSPACE_CACHE_MS } from "./constants.js";
 import { SiYuanHTTP } from "../modules/siyuan-http.js";
-import { SiYuanCLI } from "../modules/siyuan.js";
+import {
+  SiYuanCLI,
+  isBlockID,
+  siyuanTimestamp,
+} from "../modules/siyuan.js";
 import { isWriteUnknown } from "../modules/siyuan-process.js";
 
 export default {
@@ -67,6 +71,8 @@ export default {
     }
   },
 
+  /* --------------------------------------------------------------- write */
+
   /**
    * Append to today's daily note, preferring the CLI.
    *
@@ -74,10 +80,10 @@ export default {
    * @param {String} markdown
    * @param {Object} [hooks] - what the self test watches this write with
    * @param {Object} [options]
+   * @param {Object} [options.target] - a destination from `_resolveDestination`
    * @param {Boolean} [options.collectBlocks] - also list the sibling blocks
-   *   of the write. Only the self test needs them, and only to delete them
-   *   again — for a real send they would cost one process more.
-   * @returns {Promise<{transport: String, documentID: String, blockID: String}>}
+   *   of the write. Only the self test and a batch send need them.
+   * @returns {Promise<{transport: String, documentID: String, blockID: String, blocks: String[], blockRows: Object[], blocksExact: Boolean}>}
    */
   async _append(notebookID, markdown, hooks = null, options = {}) {
     // The self test watches a send of its own, so it decides what the write
@@ -86,6 +92,11 @@ export default {
     if (hooks && hooks.append) {
       return await hooks.append(notebookID, markdown);
     }
+    const target = options.target || null;
+    if (target && target.kind !== "daily" && target.documentID) {
+      return await this._appendToDocument(target, markdown, options);
+    }
+    const since = siyuanTimestamp();
     try {
       const written = await this.getCLI().appendToDailyNote(
         notebookID,
@@ -98,8 +109,8 @@ export default {
         documentID: written.documentID || "",
         blockID: written.blockID || "",
         blocks: written.blocks || [],
+        blockRows: written.blockRows || [],
         blocksExact: !!written.blocksExact,
-
       };
     }
     catch (cliError) {
@@ -128,14 +139,22 @@ export default {
       try {
         const http = await this._httpClient();
         const written = await http.appendDailyNote(notebookID, markdown);
+        const documentID = written.documentID || "";
+        // The HTTP API names the block it made, but not its siblings. A
+        // batch still needs them to tell which block belongs to which
+        // annotation, so they are read back when they are asked for.
+        const blockRows = options.collectBlocks && documentID
+          ? await this._httpBlockRows(http, documentID, since)
+          : [];
         return {
           transport: "the SiYuan HTTP API",
-          documentID: written.documentID || "",
+          documentID,
           blockID: written.blockID || "",
           blocks: written.blockID ? [written.blockID] : [],
-          // The HTTP API names the block it made, but not its siblings.
+          blockRows,
+          // Read back after the write, not before it: a note the user wrote
+          // in the same second would be in this list too.
           blocksExact: false,
-
         };
       }
       catch (httpError) {
@@ -152,6 +171,248 @@ export default {
         throw combined;
       }
     }
+  },
+
+  /**
+   * Append to a document that is not the daily note.
+   *
+   * Same two transports as the daily note, same contract: a write whose
+   * answer never arrived is reported as unknown, and is *not* retried over
+   * the other transport — that would put the note in twice.
+   *
+   * @param {Object} target - { documentID }
+   * @param {String} markdown
+   * @param {Object} options
+   * @returns {Promise<Object>}
+   */
+  async _appendToDocument(target, markdown, options = {}) {
+    const documentID = target && target.documentID;
+    if (!isBlockID(documentID)) {
+      throw new Error(`"${documentID}" is not a SiYuan document id`);
+    }
+    try {
+      const written = await this.getCLI().appendToDocument(
+        documentID,
+        markdown,
+        { collectBlocks: !!options.collectBlocks },
+      );
+      this._lastCLIError = "";
+      return {
+        transport: "the siyuan CLI",
+        documentID: written.documentID || documentID,
+        blockID: written.blockID || "",
+        blocks: written.blocks || [],
+        blockRows: written.blockRows || [],
+        blocksExact: !!written.blocksExact,
+      };
+    }
+    catch (cliError) {
+      this._lastCLIError = cliError.message;
+      if (isWriteUnknown(cliError)) {
+        const error = new Error(
+          `${cliError.message}\n\n` +
+            "The note may already have reached SiYuan, so it was not sent " +
+            "again. Check the target document before trying it a second time.",
+        );
+        error.writeState = "unknown";
+        error.written = true;
+        throw error;
+      }
+      Zotero.debug(
+        `ZoteroSiYuan: the CLI could not append to ${documentID} (${cliError.message}); trying the HTTP API`,
+      );
+      try {
+        const http = await this._httpClient();
+        const since = siyuanTimestamp();
+        const before = options.collectBlocks
+          ? await this._httpBlockIDs(http, documentID)
+          : null;
+        const written = await http.appendBlock(documentID, markdown);
+        const blockID = written.blockID || "";
+        const blockRows = options.collectBlocks
+          ? await this._httpBlockRows(http, documentID, since, before)
+          : [];
+        return {
+          transport: "the SiYuan HTTP API",
+          documentID: written.documentID || documentID,
+          blockID,
+          blocks: blockID ? [blockID] : [],
+          blockRows,
+          blocksExact: !!before,
+        };
+      }
+      catch (httpError) {
+        const combined = new Error(
+          `the siyuan CLI failed: ${cliError.message} — ` +
+            `the SiYuan HTTP API failed too: ${httpError.message}`,
+        );
+        if (isWriteUnknown(httpError)) {
+          combined.writeState = "unknown";
+          combined.written = true;
+        }
+        throw combined;
+      }
+    }
+  },
+
+  /**
+   * The top-level blocks of a document, over HTTP.
+   *
+   * @param {Object} http - the HTTP client
+   * @param {String} documentID
+   * @param {String} [since] - a SiYuan timestamp
+   * @param {Set<String>|null} [before] - ids that were there before the write
+   * @returns {Promise<Object[]>} rows with id, markdown and type
+   */
+  async _httpBlockRows(http, documentID, since = "", before = null) {
+    if (!isBlockID(documentID)) {
+      return [];
+    }
+    try {
+      const rows = await http.sql(
+        "SELECT id, markdown, type, root_id FROM blocks " +
+          `WHERE root_id = '${documentID}' AND parent_id = '${documentID}' ` +
+          (since ? `AND created >= '${since}' ` : "") +
+          "ORDER BY sort ASC",
+      );
+      if (!before) {
+        return Array.isArray(rows) ? rows : [];
+      }
+      return (rows || []).filter((row) => row && !before.has(row.id));
+    }
+    catch (e) {
+      Zotero.debug(
+        `ZoteroSiYuan: could not list the blocks of ${documentID} over HTTP: ${e.message}`,
+      );
+      return [];
+    }
+  },
+
+  /** The ids of a document's top-level blocks, over HTTP. */
+  async _httpBlockIDs(http, documentID) {
+    try {
+      const rows = await http.sql(
+        "SELECT id FROM blocks " +
+          `WHERE root_id = '${documentID}' AND parent_id = '${documentID}'`,
+      );
+      return new Set((rows || []).map((row) => row && row.id).filter(Boolean));
+    }
+    catch (e) {
+      return null;
+    }
+  },
+
+  /**
+   * Delete blocks, whichever transport can.
+   *
+   * "Replace" uses this to take the previous note back before writing the
+   * new one. A deletion that does not happen is not fatal for the *write*,
+   * but it is reported: the user asked for a replacement, and two notes
+   * where one was expected is something they have to know about.
+   *
+   * @param {String[]} blockIDs
+   * @returns {Promise<Boolean>} whether every deletion was accepted
+   */
+  async _deleteBlocks(blockIDs) {
+    const ids = [...new Set((blockIDs || []).filter((id) => isBlockID(id)))];
+    if (!ids.length) {
+      return true;
+    }
+    try {
+      await this.getCLI().deleteBlocks(ids);
+      return true;
+    }
+    catch (cliError) {
+      Zotero.debug(
+        `ZoteroSiYuan: the CLI could not delete the old blocks (${cliError.message}); trying the HTTP API`,
+      );
+    }
+    try {
+      const http = await this._httpClient();
+      for (const id of ids) {
+        await http.deleteBlock(id);
+      }
+      return true;
+    }
+    catch (e) {
+      Zotero.logError(
+        `ZoteroSiYuan: the old note could not be deleted: ${e.message}`,
+      );
+      return false;
+    }
+  },
+
+  /**
+   * The blocks a previous send wrote.
+   *
+   * The index remembers them when the send happened in this session. After
+   * a restart only the anchor block is known, so the siblings are looked up
+   * by the creation second the way the index scan does it.
+   *
+   * @param {Object} entry - an entry from `SiYuanIndex.getEntry`
+   * @returns {Promise<Object[]>} rows with id, markdown and type
+   */
+  async _sentBlockRows(entry) {
+    if (!entry || !entry.blockID) {
+      return [];
+    }
+    if (entry.blocks && entry.blocks.length) {
+      const rows = await this.getCLI()
+        .blockRows(entry.blocks)
+        .catch(() => []);
+      if (rows.length) {
+        return rows;
+      }
+      return entry.blocks.map((id) => ({ id, markdown: "", type: "" }));
+    }
+    try {
+      const rows = await this.getCLI().blocksOfSend(
+        entry.blockID,
+        entry.documentID,
+      );
+      if (rows.length) {
+        // A batch writes every note in the same second, so "the blocks of
+        // this second" is the whole batch. The note's own anchor says where
+        // it begins: walk back to the previous anchor.
+        if (String(entry.markdown || "").includes("zsi=batch")) {
+          return this._rowsOfOneBatchNote(rows, entry.blockID);
+        }
+        return rows;
+      }
+    }
+    catch (e) {
+      Zotero.debug(
+        `ZoteroSiYuan: could not list the blocks of the old note: ${e.message}`,
+      );
+    }
+    return [{ id: entry.blockID, markdown: entry.markdown || "", type: "" }];
+  },
+
+  /**
+   * The blocks of one note in a batch, from all the blocks of that second.
+   *
+   * A batch writes all of its notes in one append, so they share a creation
+   * second. The anchor that closes a note also marks the end of its
+   * neighbour: the blocks from after the previous anchor up to this note's
+   * anchor are exactly this note.
+   *
+   * @param {Object[]} rows - the blocks of the write, in `sort` order
+   * @param {String} blockID - the anchor block of this note
+   * @returns {Object[]}
+   */
+  _rowsOfOneBatchNote(rows, blockID) {
+    const at = (rows || []).findIndex((row) => row && row.id === blockID);
+    if (at === -1) {
+      return (rows || []).slice();
+    }
+    let start = 0;
+    for (let i = at - 1; i >= 0; i--) {
+      if (String((rows[i] && rows[i].markdown) || "").includes("zsi=batch")) {
+        start = i + 1;
+        break;
+      }
+    }
+    return rows.slice(start, at + 1);
   },
 
   /**

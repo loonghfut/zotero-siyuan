@@ -76,6 +76,108 @@
   </groupbox>
 
   <groupbox>
+    <label><html:h2 data-l10n-id="pref-destination-title"></html:h2></label>
+
+    <html:div class="zsi-field">
+      <html:label
+        class="zsi-label"
+        for="zotero-prefpane-zoteroSiYuan-destination"
+        data-l10n-id="pref-destination"
+      ></html:label>
+      <html:select
+        class="zsi-select"
+        id="zotero-prefpane-zoteroSiYuan-destination"
+      >
+        <html:option
+          value="daily"
+          data-l10n-id="pref-destination-daily"
+        ></html:option>
+        <html:option
+          value="document"
+          data-l10n-id="pref-destination-document"
+        ></html:option>
+        <html:option
+          value="item"
+          data-l10n-id="pref-destination-item"
+        ></html:option>
+      </html:select>
+    </html:div>
+
+    <html:div
+      class="zsi-field"
+      id="zotero-prefpane-zoteroSiYuan-target-document-row"
+    >
+      <html:label
+        class="zsi-label"
+        for="zotero-prefpane-zoteroSiYuan-target-document"
+        data-l10n-id="pref-target-document"
+      ></html:label>
+      <html:input
+        class="zsi-input"
+        type="text"
+        id="zotero-prefpane-zoteroSiYuan-target-document"
+        preference="targetDocument"
+      ></html:input>
+    </html:div>
+
+    <html:div
+      class="zsi-field"
+      id="zotero-prefpane-zoteroSiYuan-item-doc-row"
+    >
+      <html:label
+        class="zsi-label"
+        for="zotero-prefpane-zoteroSiYuan-item-doc-name"
+        data-l10n-id="pref-item-doc-name"
+      ></html:label>
+      <html:input
+        class="zsi-input"
+        type="text"
+        id="zotero-prefpane-zoteroSiYuan-item-doc-name"
+        preference="itemDocName"
+      ></html:input>
+      <html:label
+        class="zsi-label"
+        for="zotero-prefpane-zoteroSiYuan-item-doc-path"
+        data-l10n-id="pref-item-doc-path"
+      ></html:label>
+      <html:input
+        class="zsi-input"
+        type="text"
+        id="zotero-prefpane-zoteroSiYuan-item-doc-path"
+        preference="itemDocPath"
+      ></html:input>
+    </html:div>
+
+    <html:div class="zsi-field">
+      <html:label
+        class="zsi-label"
+        for="zotero-prefpane-zoteroSiYuan-sent-action"
+        data-l10n-id="pref-sent-action"
+      ></html:label>
+      <html:select
+        class="zsi-select"
+        id="zotero-prefpane-zoteroSiYuan-sent-action"
+      >
+        <html:option value="ask" data-l10n-id="pref-sent-action-ask"></html:option>
+        <html:option
+          value="skip"
+          data-l10n-id="pref-sent-action-skip"
+        ></html:option>
+        <html:option
+          value="send"
+          data-l10n-id="pref-sent-action-send"
+        ></html:option>
+        <html:option
+          value="replace"
+          data-l10n-id="pref-sent-action-replace"
+        ></html:option>
+      </html:select>
+    </html:div>
+
+    <html:p class="zsi-hint" data-l10n-id="pref-destination-hint"></html:p>
+  </groupbox>
+
+  <groupbox>
     <label><html:h2 data-l10n-id="pref-picture-title"></html:h2></label>
 
     <html:div class="zsi-field zsi-field-check">

@@ -1,7 +1,7 @@
 {
   "manifest_version": 2,
   "name": "Zotero to SiYuan",
-  "version": "0.2.95",
+  "version": "0.2.98",
   "description": "Send a Zotero PDF reader annotation and its comment to your SiYuan daily note.",
   "author": "loonghfut",
   "homepage_url": "https://github.com/loonghfut/zotero-siyuan",

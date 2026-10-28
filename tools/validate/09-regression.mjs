@@ -210,7 +210,9 @@ section("Regression guards");
       join(ROOT, "src", "modules", "siyuan-process.js"),
       "utf8",
     );
-    const sendSource = readFileSync(join(ROOT, "src", "app", "send.js"), "utf8");
+    const sendSource =
+      readFileSync(join(ROOT, "src", "app", "send.js"), "utf8") +
+      readFileSync(join(ROOT, "src", "app", "send-batch.js"), "utf8");
     check(
       "a started command that cannot be read is not run a second time",
       // `Subprocess.call` has to sit outside the try that falls back: once

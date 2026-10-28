@@ -413,6 +413,9 @@ Object.assign(ZoteroSiYuanPreferences, {
       id: name ? "" : id,
       name: name,
       template: area.value,
+      // A template also remembers where its notes go — "one document per
+      // paper" is part of what the template is for.
+      ...this._destinationSettings(),
     });
     if (!result.ok) {
       this._setStatus(this._savedError(result.error), true);
@@ -487,6 +490,9 @@ Object.assign(ZoteroSiYuanPreferences, {
     this._caret = area.value.length;
     this._caretEnd = area.value.length;
     this.onTemplateInput();
+    // A template can carry where its notes go. An older one carries
+    // nothing, and then the destination in the settings is left alone.
+    this.applyTemplateDestination(entry);
     this._setStatus(
       this._text("zoteroSiYuan-pref-template-loaded", "Loaded") +
         " " +

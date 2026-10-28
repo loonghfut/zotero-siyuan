@@ -34,24 +34,15 @@ import { tempFilePath, firstOf, homeDir, localAppDataDir, roamingAppDataDir } fr
 /** How long a single CLI invocation may take before it is killed. */
 
 import { SiYuanProcess } from "./siyuan-process.js";
+import documents from "./siyuan-documents.js";
+import { isBlockID, siyuanTimestamp } from "./siyuan-sql.js";
 
 // The search paths are asked about from outside (diagnostics, the checks), so
 // they stay reachable from the module the rest of the plugin imports.
 export { buildCandidatePaths } from "./siyuan-process.js";
-
-
-
-export function siyuanTimestamp(date = new Date()) {
-  const pad = (n) => String(n).padStart(2, "0");
-  return (
-    `${date.getFullYear()}${pad(date.getMonth() + 1)}${pad(date.getDate())}` +
-    `${pad(date.getHours())}${pad(date.getMinutes())}${pad(date.getSeconds())}`
-  );
-}
-
-export function isBlockID(value) {
-  return /^\d{14}-[0-9a-z]{7}$/i.test(String(value == null ? "" : value).trim());
-}
+// The ids and timestamps are made here and read elsewhere; keeping the
+// export on this module means callers do not have to know where they moved.
+export { isBlockID, siyuanTimestamp } from "./siyuan-sql.js";
 
 export function blockCreatedAt(blockID) {
   const text = String(blockID == null ? "" : blockID).trim();
@@ -108,6 +99,7 @@ export class SiYuanCLI extends SiYuanProcess {
     }
     return notebooks[0];
   }
+
 
   /**
    * Today's daily note, created when it does not exist yet.
@@ -332,13 +324,15 @@ export class SiYuanCLI extends SiYuanProcess {
       // Every top-level block of the same append shares its creation
       // second. They are collected for the self test, which has to take
       // them all back again; the link itself points at the first one.
-      const blocks = collectBlocks
-        ? await this.newBlocksSince(documentID, since, before)
+      const rows = collectBlocks
+        ? await this.newBlockRowsSince(documentID, since, before)
         : [];
+      const blocks = rows.map((row) => row.id);
       return {
         documentID,
         blockID,
         blocks: blocks.length ? blocks : [blockID],
+        blockRows: rows,
         // True when the list above is "everything that appeared while this
         // write ran", not "everything with the same timestamp".
         blocksExact: collectBlocks ? !!before : false,
@@ -403,17 +397,19 @@ export class SiYuanCLI extends SiYuanProcess {
 
     // Only a snapshot of the *same* document can be trusted.
     const comparable = !!before && knownDocumentID === documentID;
-    const blocks = documentID
-      ? await this.newBlocksSince(
+    const rows = documentID
+      ? await this.newBlockRowsSince(
         documentID,
         since,
         comparable ? before : null,
       )
       : [];
+    const blocks = rows.map((row) => row.id);
     return {
       documentID,
       blockID: blocks[0] || "",
       blocks,
+      blockRows: rows,
       blocksExact: comparable,
     };
   }
@@ -494,7 +490,7 @@ export class SiYuanCLI extends SiYuanProcess {
     const statement =
       "SELECT id, type, created FROM blocks " +
       `WHERE root_id = '${documentID}' AND parent_id = '${documentID}' ` +
-      `AND created >= '${since}' ORDER BY created ASC`;
+      `AND created >= '${since}' ORDER BY sort ASC`;
     const rows = await this.runJSON(["sql", statement]);
     if (!Array.isArray(rows)) {
       return [];
@@ -537,3 +533,7 @@ export class SiYuanCLI extends SiYuanProcess {
     return report;
   }
 }
+
+// The document operations live in their own file; a caller still sees one
+// client with all of its commands.
+Object.assign(SiYuanCLI.prototype, documents);

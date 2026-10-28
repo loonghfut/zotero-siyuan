@@ -14,10 +14,21 @@ toast-batch-title = Sent to SiYuan
 toast-batch-progress = Sending %d/%d…
 toast-batch-sent = %d sent
 toast-batch-failed = %d failed
+toast-batch-skipped = %d skipped (already sent)
 toast-batch-failed-title = Not everything was sent
 toast-batch-retry = Retry the failed ones
 toast-batch-more = …and %d more
 toast-missing-annotation = the annotation is no longer in the library
+
+already-sent-title = This annotation was already sent
+already-sent-message = It is already in SiYuan. Open the existing note, send another one, or replace the last one?
+already-sent-open = Open existing
+already-sent-send = Send anyway
+already-sent-replace = Replace last
+already-sent-skipped = This annotation was already sent — skipped.
+no-target-document = No target document is configured.
+target-document-not-found = No document titled “%s” was found.
+item-document-failed = Could not create the SiYuan document for this item: %s
 menu-send-one = Send to SiYuan
 menu-send-many = Send %d annotations to SiYuan
 
