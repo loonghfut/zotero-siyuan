@@ -556,8 +556,8 @@ export const SIYUAN_ICON_SHAPES = [
 
 ## 为什么用 siyuan 命令行
 
-插件**优先走思源自带的 `siyuan` 命令行**（SiYuan 3.7+ 内置），命令行不可用时才退回
-思源的 HTTP API：
+插件**优先走思源自带的命令行**（SiYuan 3.7+ 内置，文件是 `resources/kernel/SiYuan-Kernel`），
+命令行不可用时才退回思源的 HTTP API：
 
 ```
 # 1. 确保今天的日记存在（已经有了就返回它的文档 ID）
@@ -631,6 +631,8 @@ zotero-siyuan/
 │   │   ├── siyuan-documents.js   #     文档操作：按标题/属性查找、创建、追加、回收块
 │   │   ├── siyuan-sql.js         #     块 ID、时间戳、SQL 转义
 │   │   ├── siyuan-process.js     #     启动进程、超时、读输出
+│   │   ├── siyuan-cli-path.js    #     命令行在哪：各平台的候选路径
+│   │   ├── siyuan-workspace.js   #     该用哪个工作空间：问 `workspace info`
 │   │   ├── siyuan-http.js        #     思源 HTTP API 兜底
 │   │   ├── siyuan-image.js       #     框选截图的对外门面（转出下面的 picture/）
 │   │   ├── picture/              #     框选截图，按关注点分三个文件
@@ -699,17 +701,27 @@ zotero-siyuan/
 | | |
 |---|---|
 | Zotero | 7.0 及以上（已在 Zotero 7 与 10 上核对 API） |
-| 思源笔记 | 3.7 及以上（`siyuan` 命令行随内核附带） |
+| 思源笔记 | 3.7 及以上（命令行 `SiYuan-Kernel` 在安装目录的 `resources/kernel/` 下） |
 | Node.js | 22.8 及以上（构建用；构建工具 `zotero-plugin-scaffold` 的要求） |
 
-Windows 上 `siyuan.exe` 通常在：
+思源 3.7+ 的命令行文件叫 **`SiYuan-Kernel`**（Windows 上是 `SiYuan-Kernel.exe`），
+各平台的默认位置：
 
 ```
-%LOCALAPPDATA%\Programs\SiYuan\resources\kernel\siyuan.exe
+Windows  %LOCALAPPDATA%\Programs\SiYuan\resources\kernel\SiYuan-Kernel.exe
+macOS    /Applications/SiYuan.app/Contents/Resources/kernel/SiYuan-Kernel
+Linux    /opt/SiYuan/resources/kernel/SiYuan-Kernel
 ```
 
-插件会依次尝试：偏好设置里填的路径 → PATH → 上述默认安装位置 → `%ProgramFiles%` 下的同名路径。
-每一项都**先验证能不能启动再使用**，失败会继续往下试。
+`siyuan` / `siyuan.exe` 这个名字不是思源自带的：Windows 安装器会在旁边建一个**硬链接**，
+macOS/Linux 则需要你自己 `ln -s`（思源 README 里的做法）。插件两种名字都会找，
+所以没建过链接的安装也能用。
+
+插件会依次尝试：偏好设置里填的路径 → PATH（含 `/usr/local/bin`、`/opt/homebrew/bin`）
+→ 上述默认安装位置 → 各平台的其他常见布局。每一项都**先验证能不能启动再使用**，失败会继续往下试。
+工作空间留空时，插件会先问 `workspace info` 要思源当前的工作空间再传 `-w`——
+macOS 上命令行的默认值是 `~/SiYuan`，而思源实际用的是 `~/Library/Application Support/SiYuan`，
+不显式传就会找不到。
 
 ## 构建
 
@@ -717,7 +729,7 @@ Windows 上 `siyuan.exe` 通常在：
 npm install
 npm run build     # 产物：zotero-siyuan.xpi（构建后自动同步到仓库根目录）
 npm start         # 启动 Zotero 并热重载插件（开发用）
-npm run check     # 静态回归闸门（496 项）
+npm run check     # 静态回归闸门（949 项）
 npm run build:ci  # 同 build，但不动版本号（CI 用）
 npm run ci        # build:ci + check
 ```
@@ -984,7 +996,7 @@ node tools/siyuan-cleanup.mjs --workspace "D:\SiYuan\workspace" --marker ZoteroS
 
 | 偏好 | 默认 | 说明 |
 |---|---|---|
-| `cliPath` | 空 | `siyuan` 命令行路径。留空则自动查找 |
+| `cliPath` | 空 | `SiYuan-Kernel` 命令行路径。留空则自动查找 |
 | `workspace` | 空 | 思源工作空间目录。留空 = 用 `siyuan` 当前的工作空间 |
 | `notebook` | 空 | 写进哪个笔记本：面板里是**下拉框**，打开设置时自动列出来；留空 = 第一个可用的笔记本 |
 | `destination` | `daily` | 发送到：`daily` 今天的日记 / `document` 指定文档 / `item` 每篇文献一个文档 |
@@ -1021,7 +1033,7 @@ node tools/siyuan-cleanup.mjs --workspace "D:\SiYuan\workspace" --marker ZoteroS
 
 > **路径分隔符的坑**：Firefox 启动外部程序前会检查
 > `PathUtils.isAbsolute(path)`，而 Gecko 在 Windows 上不认正斜杠路径 ——
-> `C:/Users/.../siyuan.exe` 会被判为「不是可执行文件」，`C:\Users\...\siyuan.exe` 才认。
+> `C:/Users/.../SiYuan-Kernel.exe` 会被判为「不是可执行文件」，`C:\Users\...\SiYuan-Kernel.exe` 才认。
 > 插件会把正斜杠换成反斜杠，并且**先验证再使用**；你填的路径不可用时会
 > 自动回退到自动查找，并在日志里说明。留空即可全自动。
 
@@ -1065,7 +1077,7 @@ siyuan notebook list -w "D:\SiYuan\workspace"
 | 按钮出现在阅读器侧边注释面板 | ✅ 在阅读器侧栏点到了它 |
 | 点击事件到达 handler | ✅ 在阅读器侧栏点到了它 |
 | `this._send` 可用（handler 已 bind） | ✅ 自检里按钮的 click 走到了 `_send` |
-| `siyuan` 命令行定位与启动 | ✅ 插件在 Zotero 内解析出 `…\AppData\Local\Programs\SiYuan\…\siyuan.exe` |
+| `siyuan` 命令行定位与启动 | ✅ 插件在 Zotero 内解析出 `…\AppData\Local\Programs\SiYuan\…\SiYuan-Kernel.exe` |
 | 模板渲染 | ✅ 用了你库里的真实条目（ABCD1234），含作者/年份/出处/页码/精确深链 |
 | 笔记本解析 | ✅ `我的笔记本 (20260101000000-abcdefg)` |
 | `siyuan dailynote append --notebook --file -w` 真实写入 | ✅ **在真实 Zotero 里点自己那个按钮写入成功** |

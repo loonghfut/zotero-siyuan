@@ -35,10 +35,33 @@ const listOnly = args.includes("--list") || (!ids.length && !marker);
 
 /* ----------------------------------------------------------- the CLI path */
 
-const CLI_CANDIDATES = [
-	join(process.env.LOCALAPPDATA || "", "Programs", "SiYuan", "resources", "kernel", "siyuan.exe"),
-	"C:\\Program Files\\SiYuan\\resources\\kernel\\siyuan.exe",
-];
+/*
+ * SiYuan ships its CLI as `SiYuan-Kernel` inside `resources/kernel/`; the
+ * `siyuan` name is only the Windows installer's hard link or a symlink the
+ * user made. Both are listed, in the order they are most likely to exist.
+ */
+const CLI_CANDIDATES = (() => {
+	if (process.platform === "win32") {
+		const local = process.env.LOCALAPPDATA || "";
+		return [
+			join(local, "Programs", "SiYuan", "resources", "kernel", "SiYuan-Kernel.exe"),
+			join(local, "Programs", "SiYuan", "resources", "kernel", "siyuan.exe"),
+			"C:\\Program Files\\SiYuan\\resources\\kernel\\SiYuan-Kernel.exe",
+		];
+	}
+	if (process.platform === "darwin") {
+		return [
+			"/Applications/SiYuan.app/Contents/Resources/kernel/SiYuan-Kernel",
+			"/usr/local/bin/siyuan",
+			"/opt/homebrew/bin/siyuan",
+		];
+	}
+	return [
+		"/opt/SiYuan/resources/kernel/SiYuan-Kernel",
+		"/opt/siyuan/resources/kernel/SiYuan-Kernel",
+		"/usr/local/bin/siyuan",
+	];
+})();
 
 function findCLI() {
 	for (const candidate of CLI_CANDIDATES) {

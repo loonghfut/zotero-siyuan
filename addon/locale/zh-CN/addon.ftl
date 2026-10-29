@@ -98,7 +98,7 @@ transport-updated = 已在原块上更新
 
 # 显示给用户的错误提示。%s 由代码填入，可能是机器返回的英文细节。
 error-tried = 尝试过：
-error-cli-not-found = 找不到 siyuan 命令行。它随思源 3.7 及以上版本一起安装（Windows 上位于 %LOCALAPPDATA%\Programs\SiYuan\resources\kernel\siyuan.exe）。可以把命令行路径留空以自动查找，或填上 siyuan.exe 的完整路径。
+error-cli-not-found = 找不到思源命令行。思源 3.7 及以上版本把它装在安装目录的 resources/kernel 下，文件名是「SiYuan-Kernel」（Windows 上是 SiYuan-Kernel.exe）——例如 macOS 的 /Applications/SiYuan.app/Contents/Resources/kernel/SiYuan-Kernel。可以把命令行路径留空以自动查找，或填上这个文件的完整路径。
 error-cli-spawn = 无法运行思源命令行「%s」：%s
 error-cli-spawn-twice = 无法运行思源命令行「%s」：%s（第一次尝试：%s）
 error-cli-timeout = 思源命令行在 %s 毫秒内没有响应。

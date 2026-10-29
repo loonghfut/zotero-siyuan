@@ -33,7 +33,19 @@ const candidates = buildCandidatePaths({
 });
 
 check(
-  "the LocalAppData candidate is present",
+  "the LocalAppData kernel is a candidate",
+  localAppData
+    ? candidates.includes(
+        `${localAppData}\\Programs\\SiYuan\\resources\\kernel\\SiYuan-Kernel.exe`,
+      )
+    : true,
+  "n/a on this platform",
+);
+check(
+  "the installer's siyuan.exe hard link is a candidate too",
+  // The Windows installer hard-links `siyuan.exe` next to the kernel, and
+  // the Store edition registers it as an app execution alias — either is
+  // what an older install, or one whose link was lost, needs.
   localAppData
     ? candidates.includes(
         `${localAppData}\\Programs\\SiYuan\\resources\\kernel\\siyuan.exe`,
@@ -59,25 +71,92 @@ check(
   check(
     "a candidate can be derived from the home directory alone",
     fromHome.includes(
-      `${home}\\AppData\\Local\\Programs\\SiYuan\\resources\\kernel\\siyuan.exe`,
+      `${home}\\AppData\\Local\\Programs\\SiYuan\\resources\\kernel\\SiYuan-Kernel.exe`,
     ),
     fromHome.join(" | "),
   );
 }
 
-// If SiYuan is installed on this machine, the real binary must be reachable.
-const realCli = isWin
-  ? `${localAppData}\\Programs\\SiYuan\\resources\\kernel\\siyuan.exe`
-  : "/Applications/SiYuan.app/Contents/Resources/kernel/siyuan";
-if (existsSync(realCli)) {
+// macOS: the CLI is `SiYuan-Kernel` inside the app bundle. `siyuan` only
+// exists when the user made the symlink the SiYuan README suggests, so the
+// bundle path has to be searched without it.
+{
+  const mac = buildCandidatePaths({ home: "/Users/zotero", isMac: true });
+  for (const expected of [
+    "/Applications/SiYuan.app/Contents/Resources/kernel/SiYuan-Kernel",
+    "/Users/zotero/Applications/SiYuan.app/Contents/Resources/kernel/SiYuan-Kernel",
+    "/usr/local/bin/siyuan",
+    "/opt/homebrew/bin/siyuan",
+  ]) {
+    check(`macOS searches ${expected}`, mac.includes(expected), mac.join(" | "));
+  }
+}
+
+// Linux: the deb/rpm packages install to /opt/SiYuan. `/usr/bin/siyuan`
+// there is the Electron app, not the CLI — launching it with `--version`
+// would open the GUI, so it must never be tried.
+{
+  const linux = buildCandidatePaths({ home: "/home/zotero" });
+  for (const expected of [
+    "/opt/SiYuan/resources/kernel/SiYuan-Kernel",
+    "/usr/local/bin/siyuan",
+    "/home/zotero/.local/share/siyuan/kernel/SiYuan-Kernel",
+  ]) {
+    check(
+      `Linux searches ${expected}`,
+      linux.includes(expected),
+      linux.join(" | "),
+    );
+  }
   check(
-    `the installed siyuan.exe is among the candidates (${realCli})`,
+    "Linux does not mistake the Electron app for the CLI",
+    !linux.includes("/usr/bin/siyuan") && !linux.includes("/usr/bin/SiYuan"),
+    linux.join(" | "),
+  );
+}
+
+// The workspace has to be named, not assumed: on macOS the CLI's own
+// default (`~/SiYuan`) is not where the app keeps its workspace
+// (`~/Library/Application Support/SiYuan`), so every command would fail on
+// a normal install.
+{
+  const processSource = readFileSync(
+    join(ROOT, "src", "modules", "siyuan-process.js"),
+    "utf8",
+  );
+  const workspaceSource = readFileSync(
+    join(ROOT, "src", "modules", "siyuan-workspace.js"),
+    "utf8",
+  );
+  check(
+    "every command is given the workspace explicitly",
+    /const workspace = await this\.workspaceFor\(args\);/.test(processSource) &&
+      /argv\.push\("-w", workspace\)/.test(processSource),
+  );
+  check(
+    "the CLI is asked which workspace SiYuan uses",
+    /runJSON\(\["workspace", "info"\]\)/.test(workspaceSource) &&
+      /info\.valid !== false/.test(workspaceSource),
+  );
+  check(
+    "a command about workspaces does not ask itself",
+    /args\[0\] === "workspace"/.test(workspaceSource),
+  );
+}
+
+// If SiYuan is installed on this machine, the real binary must be reachable.
+const realCli = candidates.find((candidate) => existsSync(candidate)) || "";
+if (realCli) {
+  check(
+    `the installed CLI is among the candidates (${realCli})`,
     candidates.includes(realCli),
     "auto-detection would miss it",
   );
 }
 else {
-  console.log(`  [SKIP] siyuan is not installed at ${realCli}`);
+  console.log(
+    "  [SKIP] no SiYuan CLI was found at any of the candidate paths",
+  );
 }
 
 // The probe has to be runnable, not merely correct: it calls four helpers

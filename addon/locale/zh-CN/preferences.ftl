@@ -16,7 +16,7 @@ pref-selftest-failed = 自检失败
 pref-rescan = 重新扫描已发送的注释
 pref-rescanning = 正在扫描思源…
 pref-rescanned = 已发送的注释
-pref-hint = 命令行路径留空会自动查找；工作空间留空则使用 siyuan 命令行当前的工作空间；笔记本留空则使用第一个笔记本。
+pref-hint = 命令行路径留空会自动查找（思源把它作为 SiYuan-Kernel 装在安装目录的 resources/kernel 下）；工作空间留空则使用思源当前打开的工作空间；笔记本留空则使用第一个笔记本。
 
 pref-destination-title = 发送到
 pref-destination = 目标位置

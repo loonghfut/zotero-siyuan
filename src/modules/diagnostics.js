@@ -12,8 +12,9 @@
  * The end-to-end self test lives in `selftest.js`.
  */
 
-import { tempFilePath } from "../utils/paths.js";
+import { tempFilePath, homeDir } from "../utils/paths.js";
 import { responseText } from "../utils/http.js";
+import { buildCandidatePaths } from "./siyuan-process.js";
 
 const REPORT_FILE = "zotero-siyuan-diagnostics.json";
 
@@ -179,26 +180,50 @@ async function collectDiagnostics(report, executable) {
 			return "";
 		}
 	})();
+	const roamingAppData = (() => {
+		try {
+			return Services.env.get("APPDATA") || "";
+		}
+		catch (e) {
+			return "";
+		}
+	})();
 
+	// The same list the CLI lookup uses, so the report explains exactly
+	// what a send would have tried.
 	const candidates = [];
 	if (executable) {
-		candidates.push(executable);
-		candidates.push(executable.replace(/\//g, "\\"));
-	}
-	if (localAppData) {
 		candidates.push(
-			`${localAppData}\\Programs\\SiYuan\\resources\\kernel\\siyuan.exe`,
+			Zotero.isWin ? executable.replace(/\//g, "\\") : executable,
 		);
 	}
-	if (programFiles) {
-		candidates.push(
-			`${programFiles}\\SiYuan\\resources\\kernel\\siyuan.exe`,
-		);
+	for (const candidate of buildCandidatePaths({
+		home: homeDir(),
+		localAppData,
+		roamingAppData,
+		programFiles,
+		isWin: Zotero.isWin,
+		isMac: Zotero.isMac,
+	})) {
+		if (!candidates.includes(candidate)) {
+			candidates.push(candidate);
+		}
 	}
-	candidates.push("C:\\Program Files\\SiYuan\\resources\\kernel\\siyuan.exe");
 	report.candidates = candidates;
 
-	const primary = candidates.find((x) => x.includes("\\")) || candidates[0];
+	// The first candidate that is really there is the one worth launching;
+	// on a machine without SiYuan the first one is still better than none.
+	let primary = candidates[0] || "";
+	for (const candidate of candidates) {
+		try {
+			await IOUtils.stat(candidate);
+			primary = candidate;
+			break;
+		}
+		catch (e) {
+			// not there — keep looking
+		}
+	}
 
 	report.steps.push(
 		await step("PathUtils.isAbsolute(candidate)", () => ({
@@ -236,11 +261,26 @@ async function collectDiagnostics(report, executable) {
 	);
 
 	report.steps.push(
-		await step("Subprocess.pathSearch('siyuan')", async () => {
+		await step("Subprocess.pathSearch", async () => {
 			const { Subprocess } = ChromeUtils.importESModule(
 				"resource://gre/modules/Subprocess.sys.mjs",
 			);
-			return { found: await Subprocess.pathSearch("siyuan") };
+			// The CLI is `SiYuan-Kernel`; `siyuan` only exists when the
+			// installer or the user made a link. Both are asked for, so a
+			// report shows which one is reachable.
+			const names = Zotero.isWin
+				? ["siyuan", "siyuan.exe", "SiYuan-Kernel.exe"]
+				: ["siyuan", "SiYuan-Kernel"];
+			const found = {};
+			for (const name of names) {
+				try {
+					found[name] = (await Subprocess.pathSearch(name)) || "";
+				}
+				catch (e) {
+					found[name] = `error: ${e.message}`;
+				}
+			}
+			return found;
 		}),
 	);
 

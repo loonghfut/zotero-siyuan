@@ -14,6 +14,12 @@ import {
   roamingAppDataDir,
   tempFilePath,
 } from "../utils/paths.js";
+import { buildCandidatePaths } from "./siyuan-cli-path.js";
+import { autoWorkspace } from "./siyuan-workspace.js";
+
+// The search paths are asked about from outside (diagnostics, the checks),
+// so they stay reachable from the module the rest of the plugin imports.
+export { buildCandidatePaths } from "./siyuan-cli-path.js";
 
 const COMMAND_TIMEOUT = 30000;
 
@@ -54,68 +60,6 @@ export function isWriteUnknown(error) {
   return !!error.written || !!error.timedOut;
 }
 
-export function buildCandidatePaths({
-  home = "",
-  localAppData = "",
-  roamingAppData = "",
-  programFiles = "",
-  isWin = false,
-  isMac = false,
-} = {}) {
-  const candidates = [];
-
-  if (isWin) {
-    const localBases = [];
-    if (localAppData) {
-      localBases.push(localAppData);
-    }
-    if (home) {
-      localBases.push(`${home}\\AppData\\Local`);
-    }
-    for (const base of localBases) {
-      candidates.push(
-        `${base}\\Programs\\SiYuan\\resources\\kernel\\siyuan.exe`,
-      );
-      candidates.push(`${base}\\SiYuan\\resources\\kernel\\siyuan.exe`);
-    }
-    if (roamingAppData) {
-      candidates.push(
-        `${roamingAppData}\\SiYuan\\resources\\kernel\\siyuan.exe`,
-      );
-    }
-    for (const base of [
-      programFiles,
-      "C:\\Program Files",
-      "C:\\Program Files (x86)",
-    ]) {
-      if (base) {
-        candidates.push(`${base}\\SiYuan\\resources\\kernel\\siyuan.exe`);
-      }
-    }
-  }
-  else if (isMac) {
-    candidates.push(
-      "/Applications/SiYuan.app/Contents/Resources/kernel/siyuan",
-    );
-    if (home) {
-      candidates.push(
-        `${home}/Applications/SiYuan.app/Contents/Resources/kernel/siyuan`,
-      );
-    }
-  }
-  else {
-    candidates.push(
-      "/usr/lib/siyuan/resources/kernel/siyuan",
-      "/opt/siyuan/resources/kernel/siyuan",
-    );
-    if (home) {
-      candidates.push(`${home}/.local/share/siyuan/kernel/siyuan`);
-    }
-  }
-
-  return candidates;
-}
-
 export class SiYuanProcess {
   constructor(options = {}) {
     this.executable = options.executable || ""; // explicit path, "" = auto-detect
@@ -140,8 +84,14 @@ export class SiYuanProcess {
     const command = await this.resolveExecutable();
     const argv = args.slice();
 
-    if (this.workspace) {
-      argv.push("-w", this.workspace);
+    // A SiYuan install does not have to sit where the CLI would look by
+    // itself — on macOS the CLI's own default is `~/SiYuan`, while the app
+    // puts its workspace in `~/Library/Application Support/SiYuan`. So the
+    // workspace is named explicitly whenever it is known; `workspaceFor()`
+    // never throws: when it cannot tell, the CLI's default is still tried.
+    const workspace = await this.workspaceFor(args);
+    if (workspace) {
+      argv.push("-w", workspace);
     }
 
     Zotero.debug(`ZoteroSiYuan: running ${command} ${argv.join(" ")}`);
@@ -195,6 +145,22 @@ export class SiYuanProcess {
       }
       throw e;
     }
+  }
+
+  /**
+   * The workspace a command should name with `-w`.
+   *
+   * A configured one always wins. Without one, the CLI is asked which
+   * workspace SiYuan is set up with — see `siyuan-workspace.js` for why
+   * its own default is not good enough. Empty means "let the CLI decide".
+   *
+   * @param {String[]} args - the command, so `workspace …` is not asked
+   *   about itself
+   * @returns {Promise<String>}
+   */
+
+  async workspaceFor(args) {
+    return this.workspace || (await autoWorkspace(this, args));
   }
 
   /**
@@ -417,6 +383,22 @@ export class SiYuanProcess {
   }
 
   /**
+   * Does this answer come from the SiYuan CLI?
+   *
+   * `--version` on the kernel prints “SiYuan-Kernel version 3.8.8”. Asking
+   * that the answer names SiYuan keeps a path that starts the *desktop app*
+   * instead — on Linux `/usr/bin/siyuan` is the Electron app — from being
+   * taken for the CLI just because it launched.
+   *
+   * @param {String} text
+   * @returns {Boolean}
+   */
+
+  looksLikeCLI(text) {
+    return /siyuan/i.test(String(text || ""));
+  }
+
+  /**
    * Can this file actually be launched?
    *
    * Deliberately does not pre-check with IOUtils/PathUtils: Firefox's
@@ -441,12 +423,28 @@ export class SiYuanProcess {
         stderr: "stdout",
       });
       const { out, exitCode } = await this.readProcess(proc);
-      return { ok: true, output: out.trim(), exitCode, error: "" };
+      const text = out.trim();
+      if (this.looksLikeCLI(text)) {
+        return { ok: true, output: text, exitCode, error: "" };
+      }
+      attempts.push(
+        `Subprocess.call: “${text.slice(0, 80)}” is not the SiYuan CLI`,
+      );
+      // The file ran and answered: trying it a second way cannot turn it
+      // into the CLI, and on Linux the wrong file is the desktop app,
+      // which would only be started a second time.
+      return { ok: false, output: text, exitCode, error: attempts.join(" | ") };
     }
     catch (e) {
       attempts.push(
         `Subprocess.call: ${e && e.message ? e.message : String(e)}`,
       );
+      // The file started but never answered — the desktop app does that
+      // when it is asked for `--version`. Another attempt would only start
+      // a second window.
+      if (e && e.timedOut) {
+        return { ok: false, output: "", exitCode: -1, error: attempts.join(" | ") };
+      }
     }
 
     // Zotero's own helper uses the same module, but it is imported in the
@@ -457,10 +455,13 @@ export class SiYuanProcess {
         "--version",
       ]);
       const text = String(out || "").trim();
-      if (text) {
+      if (this.looksLikeCLI(text)) {
         return { ok: true, output: text, exitCode: 0, error: "" };
       }
-      attempts.push("Zotero.Utilities.Internal.subprocess: no output");
+      attempts.push(
+        `Zotero.Utilities.Internal.subprocess: “${text.slice(0, 80)}” ` +
+          "is not the SiYuan CLI",
+      );
     }
     catch (e) {
       attempts.push(
@@ -499,10 +500,16 @@ export class SiYuanProcess {
       const { Subprocess } = ChromeUtils.importESModule(
         "resource://gre/modules/Subprocess.sys.mjs",
       );
-      for (const name of ["siyuan", "siyuan.exe"]) {
+      // The deb/rpm packages install the *desktop app* as /usr/bin/siyuan.
+      // Starting it would open the window (and lock the workspace) instead
+      // of answering, so a PATH hit there is not the CLI we are after.
+      const notTheCLI = new Set(["/usr/bin/siyuan", "/usr/bin/SiYuan"]);
+      for (const name of Zotero.isWin
+        ? ["siyuan", "siyuan.exe", "SiYuan-Kernel.exe"]
+        : ["siyuan", "SiYuan-Kernel"]) {
         try {
           const found = await Subprocess.pathSearch(name);
-          if (found) {
+          if (found && !notTheCLI.has(found)) {
             this.executable = found;
             this._resolved = true;
             return found;
@@ -534,9 +541,12 @@ export class SiYuanProcess {
     throw new Error(
       getString(
         "zoteroSiYuan-error-cli-not-found",
-        "Could not find the siyuan CLI. It ships with SiYuan 3.7 or later " +
-          "(on Windows: %LOCALAPPDATA%\\Programs\\SiYuan\\resources\\kernel\\siyuan.exe). " +
-          "Leave the CLI path empty to find it automatically, or set the full path to siyuan.exe.",
+        "Could not find the SiYuan CLI. SiYuan 3.7 or later ships it as " +
+          "“SiYuan-Kernel” (SiYuan-Kernel.exe on Windows) in the installation's " +
+          "resources/kernel folder — on macOS for example " +
+          "/Applications/SiYuan.app/Contents/Resources/kernel/SiYuan-Kernel. " +
+          "Leave the CLI path empty to find it automatically, or set the full " +
+          "path to that file.",
       ) +
         (failures.length
           ? "\n" +

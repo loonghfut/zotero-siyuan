@@ -1,9 +1,9 @@
 /**
  * SiYuan command line client.
  *
- * Talks to SiYuan through its own CLI (SiYuan 3.7+ ships `siyuan` next to
- * the kernel; on Windows that is
- * `…\SiYuan\resources\kernel\siyuan.exe`).
+ * Talks to SiYuan through its own CLI (SiYuan 3.7+ ships `SiYuan-Kernel` in
+ * the installation's `resources/kernel/`; the Windows installer also makes
+ * a `siyuan.exe` hard link next to it).
  *
  * The CLI works directly on the workspace, so no API token, host or port is
  * needed, and it resolves the daily-note path from SiYuan's own settings.

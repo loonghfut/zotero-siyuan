@@ -16,7 +16,7 @@ pref-selftest-failed = Self test failed
 pref-rescan = Re-scan the sent annotations
 pref-rescanning = Scanning SiYuan…
 pref-rescanned = Sent annotations found
-pref-hint = Leave the CLI path empty to find it automatically. Leave the workspace empty to use the one the siyuan CLI currently uses, and the notebook empty to use the first one.
+pref-hint = Leave the CLI path empty to find it automatically (SiYuan ships it as SiYuan-Kernel in the installation's resources/kernel folder). Leave the workspace empty to use the workspace SiYuan has open, and the notebook empty to use the first one.
 
 pref-destination-title = Send to
 pref-destination = Destination

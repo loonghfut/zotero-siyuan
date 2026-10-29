@@ -99,7 +99,7 @@ transport-updated = updated in place
 # Errors shown to the user. The %s placeholders are filled by the code and
 # may carry a detail that is itself in another language.
 error-tried = Tried:
-error-cli-not-found = Could not find the siyuan CLI. It ships with SiYuan 3.7 or later (on Windows: %LOCALAPPDATA%\Programs\SiYuan\resources\kernel\siyuan.exe). Leave the CLI path empty to find it automatically, or set the full path to siyuan.exe.
+error-cli-not-found = Could not find the SiYuan CLI. SiYuan 3.7 or later ships it as “SiYuan-Kernel” (SiYuan-Kernel.exe on Windows) in the installation's resources/kernel folder — on macOS for example /Applications/SiYuan.app/Contents/Resources/kernel/SiYuan-Kernel. Leave the CLI path empty to find it automatically, or set the full path to that file.
 error-cli-spawn = Could not run the SiYuan CLI at “%s”: %s
 error-cli-spawn-twice = Could not run the SiYuan CLI at “%s”: %s (first attempt: %s)
 error-cli-timeout = The siyuan CLI did not answer within %s ms.
