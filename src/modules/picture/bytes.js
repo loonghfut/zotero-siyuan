@@ -5,6 +5,8 @@
  * Nothing here touches a file: the bytes come in, the bytes go out.
  */
 
+import { getString } from "../../utils/locale.js";
+
 /** The way a compressed picture is encoded. */
 export const JPEG = "image/jpeg";
 
@@ -184,7 +186,14 @@ const STRATEGIES = [
 			await new Promise((resolve, reject) => {
 				picture.onload = () => resolve();
 				picture.onerror = () =>
-					reject(new Error("the picture could not be decoded"));
+					reject(
+						new Error(
+							getString(
+								"zoteroSiYuan-error-picture-decode",
+								"The picture could not be decoded.",
+							),
+						),
+					);
 				picture.src = url;
 			});
 			return picture;

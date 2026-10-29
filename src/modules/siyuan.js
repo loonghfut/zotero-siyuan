@@ -30,12 +30,23 @@
  */
 
 import { tempFilePath, firstOf, homeDir, localAppDataDir, roamingAppDataDir } from "../utils/paths.js";
+import { fill, getString } from "../utils/locale.js";
 
 /** How long a single CLI invocation may take before it is killed. */
 
 import { SiYuanProcess } from "./siyuan-process.js";
 import documents from "./siyuan-documents.js";
 import { isBlockID, siyuanTimestamp } from "./siyuan-sql.js";
+
+/** The error for a value that should be a block id but is not. */
+function blockIDError(value) {
+  return new Error(
+    fill(
+      getString("zoteroSiYuan-error-invalid-block-id", "“%s” is not a block id"),
+      value,
+    ),
+  );
+}
 
 // The search paths are asked about from outside (diagnostics, the checks), so
 // they stay reachable from the module the rest of the plugin imports.
@@ -75,7 +86,12 @@ export class SiYuanCLI extends SiYuanProcess {
   async resolveNotebook(wanted) {
     const notebooks = await this.listNotebooks();
     if (!notebooks.length) {
-      throw new Error("The selected SiYuan workspace has no notebooks.");
+      throw new Error(
+        getString(
+          "zoteroSiYuan-error-no-notebooks",
+          "The selected SiYuan workspace has no notebooks.",
+        ),
+      );
     }
     if (wanted) {
       const lower = String(wanted).trim().toLowerCase();
@@ -88,8 +104,14 @@ export class SiYuanCLI extends SiYuanProcess {
         }
       }
       throw new Error(
-        `No SiYuan notebook named "${wanted}". Available: ` +
+        fill(
+          getString(
+            "zoteroSiYuan-error-notebook-not-found",
+            "No SiYuan notebook named “%s”. Available: %s",
+          ),
+          wanted,
           notebooks.map((n) => n.name).join(", "),
+        ),
       );
     }
     for (const candidate of notebooks) {
@@ -113,7 +135,12 @@ export class SiYuanCLI extends SiYuanProcess {
 
   async createDailyNote(notebookID) {
     if (!notebookID) {
-      throw new Error("No SiYuan notebook was given.");
+      throw new Error(
+        getString(
+          "zoteroSiYuan-error-no-notebook-given",
+          "No SiYuan notebook was given.",
+        ),
+      );
     }
     const output = await this.runRaw([
       "dailynote",
@@ -124,7 +151,13 @@ export class SiYuanCLI extends SiYuanProcess {
     const documentID = String(output || "").trim();
     if (!isBlockID(documentID)) {
       throw new Error(
-        `The siyuan CLI did not answer with a document id: ${documentID.slice(0, 200)}`,
+        fill(
+          getString(
+            "zoteroSiYuan-error-cli-no-doc-id",
+            "The siyuan CLI did not answer with a document id: %s",
+          ),
+          documentID.slice(0, 200),
+        ),
       );
     }
     return documentID;
@@ -145,7 +178,7 @@ export class SiYuanCLI extends SiYuanProcess {
 
   async appendBlock(parentID, markdown) {
     if (!isBlockID(parentID)) {
-      throw new Error(`"${parentID}" is not a block id`);
+      throw blockIDError(parentID);
     }
     const path = this.tempPath();
     await Zotero.File.putContentsAsync(path, markdown);
@@ -185,7 +218,13 @@ export class SiYuanCLI extends SiYuanProcess {
         // not the shape expected. Falling back here would write it twice,
         // so this is reported instead.
         const error = new Error(
-          `siyuan block append answered with something other than JSON: ${output.slice(0, 200)}`,
+          fill(
+            getString(
+              "zoteroSiYuan-error-cli-append-not-json",
+              "siyuan block append answered with something other than JSON: %s",
+            ),
+            output.slice(0, 200),
+          ),
         );
         error.written = true;
         throw error;
@@ -193,8 +232,13 @@ export class SiYuanCLI extends SiYuanProcess {
       const id = data && typeof data.id === "string" ? data.id.trim() : "";
       if (!isBlockID(id)) {
         const error = new Error(
-          "siyuan block append did not answer with a block id: " +
+          fill(
+            getString(
+              "zoteroSiYuan-error-cli-append-no-block-id",
+              "siyuan block append did not answer with a block id: %s",
+            ),
             JSON.stringify(data).slice(0, 200),
+          ),
         );
         error.written = true;
         throw error;
@@ -230,7 +274,7 @@ export class SiYuanCLI extends SiYuanProcess {
 
   async updateBlock(blockID, markdown) {
     if (!isBlockID(blockID)) {
-      throw new Error(`"${blockID}" is not a block id`);
+      throw blockIDError(blockID);
     }
     const path = this.tempPath();
     await Zotero.File.putContentsAsync(path, markdown);
@@ -535,10 +579,18 @@ export class SiYuanCLI extends SiYuanProcess {
 
   async findBlocksSince(documentID, since) {
     if (!/^[0-9A-Za-z-]+$/.test(String(documentID))) {
-      throw new Error(`"${documentID}" is not a block id`);
+      throw blockIDError(documentID);
     }
     if (!/^[0-9]{14}$/.test(String(since))) {
-      throw new Error(`"${since}" is not a SiYuan timestamp`);
+      throw new Error(
+        fill(
+          getString(
+            "zoteroSiYuan-error-invalid-timestamp",
+            "“%s” is not a SiYuan timestamp",
+          ),
+          since,
+        ),
+      );
     }
     const statement =
       "SELECT id, type, created FROM blocks " +
@@ -554,7 +606,7 @@ export class SiYuanCLI extends SiYuanProcess {
   /** Delete a block from the workspace. */
   async deleteBlock(blockID) {
     if (!/^[0-9A-Za-z-]+$/.test(String(blockID))) {
-      throw new Error(`"${blockID}" is not a block id`);
+      throw blockIDError(blockID);
     }
     // A write as well: a delete that timed out may already have happened.
     return await this.runRaw(["block", "delete", "--id", blockID], {

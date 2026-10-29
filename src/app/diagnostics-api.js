@@ -3,6 +3,7 @@
  */
 
 import { getPref } from "../utils/prefs.js";
+import { getString } from "../utils/locale.js";
 import { SAMPLE_CACHE_MS } from "./constants.js";
 import { runDiagnostics } from "../modules/diagnostics.js";
 import { runSelfTest } from "../modules/selftest/index.js";
@@ -162,8 +163,14 @@ export default {
       annotation: {
         id: "SAMPLE",
         type: "highlight",
-        text: "This is what the highlighted text looks like.",
-        comment: "This is what your comment looks like.",
+        text: getString(
+          "zoteroSiYuan-error-sample-quote",
+          "This is what the highlighted text looks like.",
+        ),
+        comment: getString(
+          "zoteroSiYuan-error-sample-comment",
+          "This is what your comment looks like.",
+        ),
         pageLabel: "12",
         authorName: "steve",
         position: { pageIndex: 11 },

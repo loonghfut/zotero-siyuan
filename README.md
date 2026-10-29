@@ -532,6 +532,17 @@ export const SIYUAN_ICON_SHAPES = [
 所以加一条高亮后再同步，代价是一条写入，而不是把整篇文档删掉重写。不需要注释时，
 把偏好 `itemSyncAnnotations` 设为 `"0"` 即可，同步就只写信息 / 摘要 / 笔记。
 
+想让每条子笔记**各自成为文献文档下的子文档**，把偏好 `itemNotesAsSubdocs` 设为 `"1"`
+（设置面板「发送到」下面的勾选框）。这时同步只把信息 / 摘要写进文献文档，Zotero 里的每条
+子笔记各建一篇文档放在它下面：
+
+- 子文档带 `custom-zsi-section="note-document"`、`custom-zsi-item-key` 和
+  `custom-zotero-note-key`，所以再次同步会找到同一篇文档、原地改写里面那一个块；
+- 子文档的标题取笔记的第一行（和 Zotero 列表里显示的一致）；笔记第一行变了，文档会跟着改名；
+- 笔记被删掉后，它对应的子文档也会被移除（进思源回收站，可以找回）；
+- 把开关关掉再同步，笔记重新写回文献文档，插件之前建的子文档会被收回。
+- 只动带上面两个属性的文档，你自己手工建的同名文档不会被删除或改写。
+
 > 因为「上一次写的内容」是靠思源里的块属性找回来的，不是靠 Zotero 里的状态，所以换电脑、
 > 换 Zotero 库、隔了很久再同步，都能找到上一次写的那个块。删掉的部分如果已经手动
 > 改过，也会被新内容替换 —— 文档里的事实来源是 Zotero 条目。
@@ -980,6 +991,7 @@ node tools/siyuan-cleanup.mjs --workspace "D:\SiYuan\workspace" --marker ZoteroS
 | `targetDocument` | 空 | 「指定文档」的标题或块 ID |
 | `itemDocName` | `{{title}}` | 「每篇文献一个文档」的新文档标题（可用模板变量） |
 | `itemDocPath` | `/` | 新文档放在哪个路径下 |
+| `itemNotesAsSubdocs` | `0` | 是否把每条子笔记单独建成文献文档下的子文档。`1` 打开；关闭后再同步会收回子文档 |
 | `sentAction` | `ask` | 已经发过的注释：`ask` 每次问 / `skip` 跳过 / `send` 再发一条 / `replace` 替换上次 |
 | `template` | 空 | 发送模板。留空 = 内置默认模板 |
 | `itemTemplate` | 空 | 「每篇文献一个文档」单独用的模板。留空 = 沿用 `template` |

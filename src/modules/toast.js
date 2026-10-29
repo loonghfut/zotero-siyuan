@@ -324,7 +324,8 @@ export function showToast({
 			});
 		}
 		action.style.display = "block";
-		action.textContent = actionLabel || "Open in SiYuan";
+		action.textContent = actionLabel ||
+			getString("zoteroSiYuan-toast-open", "Open in SiYuan");
 	}
 	paintAction();
 

@@ -56,6 +56,12 @@ item-annotations-updated = 更新 %d 条
 item-annotations-removed = 移除 %d 条
 item-annotations-failed = %d 条失败
 item-annotations-sync-failed = 注释没能同步；文献信息已经写入。
+item-note-docs-added = 新增 %d 条
+item-note-docs-updated = 更新 %d 条
+item-note-docs-removed = 移除 %d 条
+item-note-docs-failed = %d 条失败
+item-note-docs-sync-failed = 笔记没能作为子文档同步；文献信息已经写入。
+note-document-failed = 无法为一条笔记创建思源文档：%s
 item-info = 文献信息
 item-abstract = 摘要
 item-notes = 笔记
@@ -84,3 +90,51 @@ label-page = 页码
 label-annotator = 批注人
 label-source = 来源
 template-sample-note = 这是一条子笔记的样子。
+
+# 发送成功提示里显示的发送方式。
+transport-cli = 思源命令行
+transport-http = 思源 HTTP 接口
+transport-updated = 已在原块上更新
+
+# 显示给用户的错误提示。%s 由代码填入，可能是机器返回的英文细节。
+error-tried = 尝试过：
+error-cli-not-found = 找不到 siyuan 命令行。它随思源 3.7 及以上版本一起安装（Windows 上位于 %LOCALAPPDATA%\Programs\SiYuan\resources\kernel\siyuan.exe）。可以把命令行路径留空以自动查找，或填上 siyuan.exe 的完整路径。
+error-cli-spawn = 无法运行思源命令行「%s」：%s
+error-cli-spawn-twice = 无法运行思源命令行「%s」：%s（第一次尝试：%s）
+error-cli-timeout = 思源命令行在 %s 毫秒内没有响应。
+error-cli-no-output = 思源命令行没有输出：siyuan %s
+error-cli-bad-output = 无法解析思源命令行的输出：%s
+error-cli-command-failed = siyuan %s 失败：%s
+error-cli-exit-code = 退出码 %s
+error-cli-no-doc-id = 思源命令行没有返回文档 ID：%s
+error-cli-append-not-json = siyuan block append 返回的不是 JSON：%s
+error-cli-append-no-block-id = siyuan block append 没有返回块 ID：%s
+error-http-no-token = 没有找到思源 API 令牌。
+error-http-not-json = 思源接口 %s 返回的不是 JSON：%s
+error-http-failed = 思源接口 %s 失败%s：%s
+error-http-no-doc-id = 思源没有返回文档 ID：%s
+error-http-unreachable = 无法通过 HTTP 连接到思源内核。
+error-http-no-token-workspace = 没有找到带 API 令牌的思源工作空间。
+error-http-rate-limited = 思源内核限制了认证尝试次数（失败太多次）——请稍等一下再试
+error-both-transports = 思源命令行失败：%s；思源 HTTP 接口也失败了：%s
+error-index-transports = 命令行无法执行这条查询（%s）；思源 HTTP 接口也不行（%s）
+error-write-unknown-daily = 这条笔记可能已经写进思源，所以没有再次发送。请先查看今天的日记，再决定是否重发。
+error-write-unknown-target = 这条笔记可能已经写进思源，所以没有再次发送。请先查看目标文档，再决定是否重发。
+error-no-notebooks = 所选的思源工作空间里没有笔记本。
+error-notebook-not-found = 找不到名为「%s」的思源笔记本。可用的有：%s
+error-no-notebook-given = 没有指定思源笔记本。
+error-document-needs-title = 文档需要一个标题。
+error-invalid-document-id = 「%s」不是思源文档 ID
+error-invalid-block-id = 「%s」不是块 ID
+error-invalid-timestamp = 「%s」不是思源时间戳
+error-picture-decode = 图片无法解码。
+error-sample-quote = 这是选中原文的样子。
+error-sample-comment = 这是评论的样子。
+
+# 模板编辑器对无法正常工作的模板给出的提示。
+template-problem-unknown = 未知变量：%s
+template-problem-unclosed = %s 个条件块没有闭合
+template-problem-stray-close = %s 个 {"{{"}/if{"}}"} 没有对应的 {"{{"}#if{"}}"}
+template-problem-stray-else = 有 {"{{"}else{"}}"} 却没有对应的 {"{{"}#if{"}}"}
+template-problem-double-else = 一个条件块里有多个 {"{{"}else{"}}"}
+template-problem-no-body = 缺少正文——请加上 {"{{"}%s{"}}"}，否则这个区段的内容不会写出来

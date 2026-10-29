@@ -3,6 +3,7 @@
  */
 
 import { getPref } from "../utils/prefs.js";
+import { fill, getString } from "../utils/locale.js";
 import {
   ANNOTATION_KEY_ATTR,
   attributeValue,
@@ -68,8 +69,14 @@ export default {
       }
       catch (httpError) {
         throw new Error(
-          `the siyuan CLI failed: ${cliError.message} — ` +
-            `the SiYuan HTTP API failed too: ${httpError.message}`,
+          fill(
+            getString(
+              "zoteroSiYuan-error-both-transports",
+              "the siyuan CLI failed: %s — the SiYuan HTTP API failed too: %s",
+            ),
+            cliError.message,
+            httpError.message,
+          ),
         );
       }
     }
@@ -109,7 +116,7 @@ export default {
       );
       this._lastCLIError = "";
       return {
-        transport: "the siyuan CLI",
+        transport: getString("zoteroSiYuan-transport-cli", "the SiYuan CLI"),
         documentID: written.documentID || "",
         blockID: written.blockID || "",
         blocks: written.blocks || [],
@@ -128,8 +135,11 @@ export default {
       if (isWriteUnknown(cliError)) {
         const error = new Error(
           `${cliError.message}\n\n` +
-            "The note may already have reached SiYuan, so it was not sent " +
-            "again. Check today's daily note before trying it a second time.",
+            getString(
+              "zoteroSiYuan-error-write-unknown-daily",
+              "The note may already have reached SiYuan, so it was not sent " +
+                "again. Check today's daily note before trying it a second time.",
+            ),
         );
         error.writeState = "unknown";
         error.written = true;
@@ -151,7 +161,10 @@ export default {
           ? await this._httpBlockRows(http, documentID, since)
           : [];
         return {
-          transport: "the SiYuan HTTP API",
+          transport: getString(
+            "zoteroSiYuan-transport-http",
+            "the SiYuan HTTP API",
+          ),
           documentID,
           blockID: written.blockID || "",
           blocks: written.blockID ? [written.blockID] : [],
@@ -163,8 +176,14 @@ export default {
       }
       catch (httpError) {
         const combined = new Error(
-          `the siyuan CLI failed: ${cliError.message} — ` +
-            `the SiYuan HTTP API failed too: ${httpError.message}`,
+          fill(
+            getString(
+              "zoteroSiYuan-error-both-transports",
+              "the siyuan CLI failed: %s — the SiYuan HTTP API failed too: %s",
+            ),
+            cliError.message,
+            httpError.message,
+          ),
         );
         // The HTTP request may have reached the kernel before its answer
         // was lost — that is not a "nothing was written" either.
@@ -192,7 +211,15 @@ export default {
   async _appendToDocument(target, markdown, options = {}) {
     const documentID = target && target.documentID;
     if (!isBlockID(documentID)) {
-      throw new Error(`"${documentID}" is not a SiYuan document id`);
+      throw new Error(
+        fill(
+          getString(
+            "zoteroSiYuan-error-invalid-document-id",
+            "“%s” is not a SiYuan document id",
+          ),
+          documentID,
+        ),
+      );
     }
     try {
       const written = await this.getCLI().appendToDocument(
@@ -202,7 +229,7 @@ export default {
       );
       this._lastCLIError = "";
       return {
-        transport: "the siyuan CLI",
+        transport: getString("zoteroSiYuan-transport-cli", "the SiYuan CLI"),
         documentID: written.documentID || documentID,
         blockID: written.blockID || "",
         blocks: written.blocks || [],
@@ -215,8 +242,11 @@ export default {
       if (isWriteUnknown(cliError)) {
         const error = new Error(
           `${cliError.message}\n\n` +
-            "The note may already have reached SiYuan, so it was not sent " +
-            "again. Check the target document before trying it a second time.",
+            getString(
+              "zoteroSiYuan-error-write-unknown-target",
+              "The note may already have reached SiYuan, so it was not sent " +
+                "again. Check the target document before trying it a second time.",
+            ),
         );
         error.writeState = "unknown";
         error.written = true;
@@ -237,7 +267,10 @@ export default {
           ? await this._httpBlockRows(http, documentID, since, before)
           : [];
         return {
-          transport: "the SiYuan HTTP API",
+          transport: getString(
+            "zoteroSiYuan-transport-http",
+            "the SiYuan HTTP API",
+          ),
           documentID: written.documentID || documentID,
           blockID,
           blocks: blockID ? [blockID] : [],
@@ -247,8 +280,14 @@ export default {
       }
       catch (httpError) {
         const combined = new Error(
-          `the siyuan CLI failed: ${cliError.message} — ` +
-            `the SiYuan HTTP API failed too: ${httpError.message}`,
+          fill(
+            getString(
+              "zoteroSiYuan-error-both-transports",
+              "the siyuan CLI failed: %s — the SiYuan HTTP API failed too: %s",
+            ),
+            cliError.message,
+            httpError.message,
+          ),
         );
         if (isWriteUnknown(httpError)) {
           combined.writeState = "unknown";

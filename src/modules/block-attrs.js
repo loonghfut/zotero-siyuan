@@ -68,6 +68,9 @@ export const ITEM_SECTION_ANNOTATIONS = "annotations";
 /** The one container a literature-note sync writes. */
 export const ITEM_SECTION_DOCUMENT = "item";
 
+/** A child note that became a document of its own, under the item's document. */
+export const ITEM_SECTION_NOTE_DOCUMENT = "note-document";
+
 /**
  * The item a literature-note block belongs to.
  *
@@ -76,6 +79,15 @@ export const ITEM_SECTION_DOCUMENT = "item";
  * every annotation note.
  */
 export const SECTION_ITEM_ATTR = "custom-zsi-item-key";
+
+/**
+ * The Zotero note a "note document" came from.
+ *
+ * The item key says which literature note the sub-document belongs to, but a
+ * note can be renamed or edited — its key is what stays. It is written on the
+ * sub-document and on the block inside it, so a later sync finds both again.
+ */
+export const NOTE_KEY_ATTR = "custom-zotero-note-key";
 
 /** The super-block fence SiYuan's Markdown parser understands. */
 export const SUPER_BLOCK_OPEN = "{{{row";
@@ -275,5 +287,41 @@ export function itemDocumentAttributes(itemKey = "", libraryID = 0) {
 		[SECTION_ATTR]: ITEM_SECTION_DOCUMENT,
 		[SECTION_ITEM_ATTR]: itemKey || "",
 		[LIBRARY_ID_ATTR]: libraryID ? String(libraryID) : "",
+	};
+}
+
+/**
+ * The attributes of one child note written as a document of its own.
+ *
+ * These are written on the **document** *and* on the one super block inside
+ * it: the document is found by its own IAL, the block is what a changed note
+ * rewrites in place. `custom-zotero-note-key` is the note's Zotero key — the
+ * one thing about it that does not change when its title does.
+ *
+ * `custom-zotero-item-key` is deliberately **not** among them: that
+ * attribute identifies the literature-note document itself, and a sub-note
+ * carrying it would be mistaken for its parent by `_findItemDocument`.
+ *
+ * @param {String} itemKey - the literature item
+ * @param {Number} libraryID
+ * @param {String} noteKey - the Zotero note
+ * @param {String} [modified] - the note's `dateModified`
+ * @param {String} [template] - the notes template's fingerprint
+ * @returns {Object}
+ */
+export function noteDocumentAttributes(
+	itemKey = "",
+	libraryID = 0,
+	noteKey = "",
+	modified = "",
+	template = "",
+) {
+	return {
+		[SECTION_ATTR]: ITEM_SECTION_NOTE_DOCUMENT,
+		[SECTION_ITEM_ATTR]: itemKey || "",
+		[LIBRARY_ID_ATTR]: libraryID ? String(libraryID) : "",
+		[NOTE_KEY_ATTR]: noteKey || "",
+		[MODIFIED_ATTR]: modified || "",
+		[TEMPLATE_ATTR]: template || "",
 	};
 }

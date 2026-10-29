@@ -306,8 +306,8 @@ section("Note pictures — wired into the send");
 {
   check(
     "a note is converted with its pictures pointed elsewhere",
-    /_noteImageAssets\(/.test(readSrc("app/item-send.js")) &&
-      /rewriteNoteImages\(html, assets\)/.test(readSrc("app/item-send.js")),
+    /_noteImageAssets\(/.test(readSrc("app/item-note-docs.js")) &&
+      /rewriteNoteImages\(html, assets\)/.test(readSrc("app/item-note-docs.js")),
   );
   check(
     "the pictures go through the same pipeline as a 框选",

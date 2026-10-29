@@ -15,6 +15,7 @@
  * rather than configured by hand.
  */
 
+import { fill, getString } from "../utils/locale.js";
 import { homeDir, localAppDataDir, roamingAppDataDir } from "../utils/paths.js";
 import { responseText } from "../utils/http.js";
 
@@ -120,7 +121,12 @@ export class SiYuanHTTP {
 
   async request(endpoint, payload) {
     if (!this.token) {
-      throw new Error("No SiYuan API token found.");
+      throw new Error(
+        getString(
+          "zoteroSiYuan-error-http-no-token",
+          "No SiYuan API token was found.",
+        ),
+      );
     }
     const response = await Zotero.HTTP.request("POST", this.baseURL + endpoint, {
       body: JSON.stringify(payload || {}),
@@ -139,12 +145,29 @@ export class SiYuanHTTP {
     }
     catch (e) {
       throw new Error(
-        `SiYuan returned a non-JSON response from ${endpoint}: ${text.slice(0, 200)}`,
+        fill(
+          getString(
+            "zoteroSiYuan-error-http-not-json",
+            "SiYuan returned a non-JSON response from %s: %s",
+          ),
+          endpoint,
+          text.slice(0, 200),
+        ),
       );
     }
     if (result.code !== 0) {
       const reason = result.data && result.data.reason ? ` (${result.data.reason})` : "";
-      const error = new Error(`SiYuan ${endpoint} failed${reason}: ${result.msg}`);
+      const error = new Error(
+        fill(
+          getString(
+            "zoteroSiYuan-error-http-failed",
+            "SiYuan %s failed%s: %s",
+          ),
+          endpoint,
+          reason,
+          result.msg,
+        ),
+      );
       // The kernel answered — it looked at the request and said no. That is
       // a definite "nothing was written", unlike a request that never got
       // an answer.
@@ -304,7 +327,13 @@ export class SiYuanHTTP {
       : data && (data.id || data.ID) || "";
     if (!blockIDOf(id)) {
       throw new Error(
-        `SiYuan did not answer with a document id: ${JSON.stringify(data).slice(0, 200)}`,
+        fill(
+          getString(
+            "zoteroSiYuan-error-http-no-doc-id",
+            "SiYuan did not answer with a document id: %s",
+          ),
+          JSON.stringify(data).slice(0, 200),
+        ),
       );
     }
     return blockIDOf(id);
@@ -335,13 +364,46 @@ export class SiYuanHTTP {
   }
 
   /**
+   * Remove a document.
+   *
+   * A document cannot be deleted as a block, so the kernel has a document
+   * endpoint of its own. It moves the document to SiYuan's trash.
+   *
+   * @param {String} id
+   * @returns {Promise<void>}
+   */
+  async deleteDocument(id) {
+    await this.request("/api/filetree/removeDocByID", { id });
+  }
+
+  /**
+   * Give a document a new title.
+   *
+   * @param {String} id
+   * @param {String} title
+   * @returns {Promise<void>}
+   */
+  async renameDocument(id, title) {
+    const name = String(title || "").trim();
+    if (!name) {
+      return;
+    }
+    await this.request("/api/filetree/renameDocByID", { id, title: name });
+  }
+
+  /**
    * Resolve the notebook that should receive the daily note.
    * @param {string} wanted - notebook name or id; empty = first usable one
    */
   async resolveNotebook(wanted) {
     const notebooks = await this.listNotebooks();
     if (!notebooks.length) {
-      throw new Error("The selected SiYuan workspace has no notebooks.");
+      throw new Error(
+        getString(
+          "zoteroSiYuan-error-no-notebooks",
+          "The selected SiYuan workspace has no notebooks.",
+        ),
+      );
     }
     if (wanted) {
       const lower = String(wanted).trim().toLowerCase();
@@ -354,8 +416,14 @@ export class SiYuanHTTP {
         }
       }
       throw new Error(
-        `No SiYuan notebook named "${wanted}". Available: ` +
+        fill(
+          getString(
+            "zoteroSiYuan-error-notebook-not-found",
+            "No SiYuan notebook named “%s”. Available: %s",
+          ),
+          wanted,
           notebooks.map((n) => n.name).join(", "),
+        ),
       );
     }
     for (const notebook of notebooks) {
@@ -435,8 +503,20 @@ export class SiYuanHTTP {
     }
 
     throw new Error(
-      "Could not reach a SiYuan kernel over HTTP. " +
-        (errors.length ? "Tried:\n  " + errors.join("\n  ") : "No workspace with an API token was found."),
+      getString(
+        "zoteroSiYuan-error-http-unreachable",
+        "Could not reach a SiYuan kernel over HTTP.",
+      ) +
+        (errors.length
+          ? "\n" +
+            getString("zoteroSiYuan-error-tried", "Tried:") +
+            "\n  " +
+            errors.join("\n  ")
+          : "\n" +
+            getString(
+              "zoteroSiYuan-error-http-no-token-workspace",
+              "No workspace with an API token was found.",
+            )),
     );
   }
 
@@ -451,8 +531,11 @@ export class SiYuanHTTP {
     const text = error && error.message ? error.message : String(error);
     if (/\b429\b/.test(text)) {
       return (
-        "the kernel is rate-limiting authentication attempts (too many failed " +
-        "ones) — wait a moment and try again" +
+        getString(
+          "zoteroSiYuan-error-http-rate-limited",
+          "the kernel is rate-limiting authentication attempts (too many " +
+            "failed ones) — wait a moment and try again",
+        ) +
         (text.includes(":") ? ` [${text.split(":").pop().trim()}]` : "")
       );
     }

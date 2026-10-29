@@ -56,6 +56,12 @@ item-annotations-updated = %d updated
 item-annotations-removed = %d removed
 item-annotations-failed = %d failed
 item-annotations-sync-failed = The annotations could not be synced; the details are in SiYuan.
+item-note-docs-added = %d added
+item-note-docs-updated = %d updated
+item-note-docs-removed = %d removed
+item-note-docs-failed = %d failed
+item-note-docs-sync-failed = The notes could not be synced as documents; the details are in SiYuan.
+note-document-failed = Could not create the SiYuan document for a note: %s
 item-info = Item details
 item-abstract = Abstract
 item-notes = Notes
@@ -84,3 +90,52 @@ label-page = Page
 label-annotator = Annotated by
 label-source = Source
 template-sample-note = This is what a child note looks like.
+
+# How a note reached SiYuan, shown in the confirmation bubble.
+transport-cli = the SiYuan CLI
+transport-http = the SiYuan HTTP API
+transport-updated = updated in place
+
+# Errors shown to the user. The %s placeholders are filled by the code and
+# may carry a detail that is itself in another language.
+error-tried = Tried:
+error-cli-not-found = Could not find the siyuan CLI. It ships with SiYuan 3.7 or later (on Windows: %LOCALAPPDATA%\Programs\SiYuan\resources\kernel\siyuan.exe). Leave the CLI path empty to find it automatically, or set the full path to siyuan.exe.
+error-cli-spawn = Could not run the SiYuan CLI at “%s”: %s
+error-cli-spawn-twice = Could not run the SiYuan CLI at “%s”: %s (first attempt: %s)
+error-cli-timeout = The siyuan CLI did not answer within %s ms.
+error-cli-no-output = The siyuan CLI returned no output for: siyuan %s
+error-cli-bad-output = Could not parse the siyuan CLI output: %s
+error-cli-command-failed = siyuan %s failed: %s
+error-cli-exit-code = exit code %s
+error-cli-no-doc-id = The siyuan CLI did not answer with a document id: %s
+error-cli-append-not-json = siyuan block append answered with something other than JSON: %s
+error-cli-append-no-block-id = siyuan block append did not answer with a block id: %s
+error-http-no-token = No SiYuan API token was found.
+error-http-not-json = SiYuan returned a non-JSON response from %s: %s
+error-http-failed = SiYuan %s failed%s: %s
+error-http-no-doc-id = SiYuan did not answer with a document id: %s
+error-http-unreachable = Could not reach a SiYuan kernel over HTTP.
+error-http-no-token-workspace = No workspace with an API token was found.
+error-http-rate-limited = the kernel is rate-limiting authentication attempts (too many failed ones) — wait a moment and try again
+error-both-transports = the SiYuan CLI failed: %s — the SiYuan HTTP API failed too: %s
+error-index-transports = the CLI could not run the query (%s); the SiYuan HTTP API could not either (%s)
+error-write-unknown-daily = The note may already have reached SiYuan, so it was not sent again. Check today's daily note before trying it a second time.
+error-write-unknown-target = The note may already have reached SiYuan, so it was not sent again. Check the target document before trying it a second time.
+error-no-notebooks = The selected SiYuan workspace has no notebooks.
+error-notebook-not-found = No SiYuan notebook named “%s”. Available: %s
+error-no-notebook-given = No SiYuan notebook was given.
+error-document-needs-title = A document needs a title.
+error-invalid-document-id = “%s” is not a SiYuan document id
+error-invalid-block-id = “%s” is not a block id
+error-invalid-timestamp = “%s” is not a SiYuan timestamp
+error-picture-decode = The picture could not be decoded.
+error-sample-quote = This is what the highlighted text looks like.
+error-sample-comment = This is what your comment looks like.
+
+# What the template editor says about a template that will not work.
+template-problem-unknown = unknown variables: %s
+template-problem-unclosed = %s conditional(s) are not closed
+template-problem-stray-close = %s {"{{"}/if{"}}"} without a {"{{"}#if{"}}"}
+template-problem-stray-else = there is an {"{{"}else{"}}"} without a {"{{"}#if{"}}"}
+template-problem-double-else = a conditional has more than one {"{{"}else{"}}"}
+template-problem-no-body = the body is missing — add {"{{"}%s{"}}"}, or the content of this section is not written

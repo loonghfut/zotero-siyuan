@@ -29,6 +29,7 @@ import "./validate/12-sending.mjs"; // Automatic sending, the queue, the local c
 import "./validate/13-block-attrs.mjs"; // The attributes a sent block carries
 import "./validate/14-item-sync.mjs"; // The literature note: sections, annotations, updates
 import "./validate/15-note-pictures.mjs"; // The pictures of a child note
+import "./validate/16-note-docs.mjs"; // A child note as its own document
 import { report } from "./validate/harness.mjs";
 
 report();

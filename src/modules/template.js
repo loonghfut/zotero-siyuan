@@ -15,6 +15,8 @@
  * it the template would leave an empty `> [!note]` block behind.
  */
 
+import { fill, getString } from "../utils/locale.js";
+
 /**
  * Every variable a template understands. The preferences pane shows this
  * list as a cheat sheet, so the wording here is what the user reads.
@@ -508,23 +510,53 @@ export function validateTemplate(template) {
 	const unbalanced = stack.length;
 
 	if (unknown.length) {
-		problems.push(`unknown variables: ${unknown.join(", ")}`);
+		problems.push(
+			fill(
+				getString(
+					"zoteroSiYuan-template-problem-unknown",
+					"unknown variables: %s",
+				),
+				unknown.join(", "),
+			),
+		);
 	}
 	if (unbalanced > 0) {
 		problems.push(
-			`${unbalanced} conditional${unbalanced > 1 ? "s are" : " is"} not closed`,
+			fill(
+				getString(
+					"zoteroSiYuan-template-problem-unclosed",
+					"%s conditional(s) are not closed",
+				),
+				unbalanced,
+			),
 		);
 	}
 	if (strayClose > 0) {
 		problems.push(
-			`${strayClose} {{/if}} without a {{#if}}`,
+			fill(
+				getString(
+					"zoteroSiYuan-template-problem-stray-close",
+					"%s {{/if}} without a {{#if}}",
+				),
+				strayClose,
+			),
 		);
 	}
 	if (strayElse) {
-		problems.push("there is an {{else}} without a {{#if}}");
+		problems.push(
+			getString(
+				"zoteroSiYuan-template-problem-stray-else",
+				"there is an {{else}} without a {{#if}}",
+			),
+		);
 	}
 	if (doubleElse) {
-		problems.push("a conditional has more than one {{else}}");
+		problems.push(
+			getString(
+				"zoteroSiYuan-template-problem-double-else",
+				"a conditional has more than one {{else}}",
+			),
+		);
 	}
 
 	return { unknown, unbalanced, strayClose, problems };

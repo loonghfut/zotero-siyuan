@@ -28,6 +28,7 @@ declare namespace _ZoteroTypes {
       "itemAbstractTemplate": string;
       "itemNotesTemplate": string;
       "itemSyncAnnotations": string;
+      "itemNotesAsSubdocs": string;
       "templates": string;
       "imageCompress": string;
       "imageQuality": string;

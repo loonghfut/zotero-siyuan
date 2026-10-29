@@ -8,7 +8,7 @@ import { siyuanBlockLink } from "../modules/metadata.js";
 import { showToast } from "../modules/toast.js";
 import { INDEX_TTL_MS } from "../modules/siyuan-index.js";
 import { launchExternally } from "../modules/siyuan-launcher.js";
-import { getString } from "../utils/locale.js";
+import { fill, getString } from "../utils/locale.js";
 import { getPref } from "../utils/prefs.js";
 
 export default {
@@ -424,8 +424,15 @@ export default {
           }
           catch (httpError) {
             throw new Error(
-              `the CLI could not run the query (${cliError.message}); ` +
-                `the SiYuan HTTP API could not either (${httpError.message})`,
+              fill(
+                getString(
+                  "zoteroSiYuan-error-index-transports",
+                  "the CLI could not run the query (%s); the SiYuan HTTP API " +
+                    "could not either (%s)",
+                ),
+                cliError.message,
+                httpError.message,
+              ),
             );
           }
         }

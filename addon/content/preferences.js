@@ -52,6 +52,7 @@ var ZoteroSiYuanPreferences = {
   ITEM_DOC_NAME_ID: "zotero-prefpane-zoteroSiYuan-item-doc-name",
   ITEM_DOC_PATH_ID: "zotero-prefpane-zoteroSiYuan-item-doc-path",
   ITEM_DOC_ROW_ID: "zotero-prefpane-zoteroSiYuan-item-doc-row",
+  ITEM_NOTES_SUBDOCS_ID: "zotero-prefpane-zoteroSiYuan-item-notes-subdocs",
   SENT_ACTION_ID: "zotero-prefpane-zoteroSiYuan-sent-action",
   NOTEBOOK_ID: "zotero-prefpane-zoteroSiYuan-notebook",
   AUTO_SEND_ID: "zotero-prefpane-zoteroSiYuan-auto-send",
@@ -233,6 +234,9 @@ var ZoteroSiYuanPreferences = {
       }
       else if (target.id === this.SENT_ACTION_ID) {
         this._saveSentAction(target.value);
+      }
+      else if (target.id === this.ITEM_NOTES_SUBDOCS_ID) {
+        this._saveItemNotesSubdocs(target.checked);
       }
       else if (target.id === this.NOTEBOOK_ID) {
         this._saveNotebook(target.value);

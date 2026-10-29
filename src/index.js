@@ -39,11 +39,13 @@ import diagnosticsApi from "./app/diagnostics-api.js";
 import itemActions from "./app/item-actions.js";
 import itemAnnotations from "./app/item-annotations.js";
 import itemMenu from "./app/item-menu.js";
+import itemNoteDocs from "./app/item-note-docs.js";
 import itemNotify from "./app/item-notify.js";
 import itemPictures from "./app/item-pictures.js";
 import itemSections from "./app/item-sections.js";
 import itemSend from "./app/item-send.js";
 import lookup from "./app/lookup.js";
+import noteDocuments from "./app/note-documents.js";
 import preferencesApi from "./app/preferences-api.js";
 import readerMarks from "./app/reader-marks.js";
 import readerUi from "./app/reader-ui.js";
@@ -400,11 +402,13 @@ Object.assign(
   itemActions,
   itemAnnotations,
   itemMenu,
+  itemNoteDocs,
   itemNotify,
   itemPictures,
   itemSections,
   itemSend,
   lookup,
+  noteDocuments,
   preferencesApi,
   readerMarks,
   readerUi,

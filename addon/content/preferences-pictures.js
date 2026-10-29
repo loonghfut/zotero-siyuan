@@ -140,7 +140,10 @@ Object.assign(ZoteroSiYuanPreferences, {
     try {
       if (!Zotero.ZoteroSiYuan || !Zotero.ZoteroSiYuan.probePictures) {
         throw new Error(
-          "The plugin is not running. Restart Zotero and try again.",
+          this._text(
+            "zoteroSiYuan-error-plugin-not-running",
+            "The plugin is not running. Restart Zotero and try again.",
+          ),
         );
       }
       var report = await Zotero.ZoteroSiYuan.probePictures();
@@ -179,8 +182,11 @@ Object.assign(ZoteroSiYuanPreferences, {
             "  |  " +
             missing
               .map(function (a) {
-                return a.key + " (" + (a.path || "no path") + ")";
-              })
+                return a.key + " (" +
+                  (a.path ||
+                    this._text("zoteroSiYuan-pref-pictures-no-path", "no path")) +
+                  ")";
+              }, this)
               .join(", "),
           true,
         );

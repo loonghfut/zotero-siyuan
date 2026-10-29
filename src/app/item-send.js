@@ -20,8 +20,6 @@ import {
 import {
   collectMetadata,
 } from "../modules/metadata.js";
-import { noteHtmlToMarkdown } from "../modules/item-note.js";
-import { rewriteNoteImages } from "../modules/note-images.js";
 import { showToast } from "../modules/toast.js";
 
 export default {
@@ -79,56 +77,6 @@ export default {
   },
 
   /**
-   * The child notes of an item as Markdown.
-   *
-   * `getNotes` throws on a note item — a note cannot have child notes — so
-   * it is only asked of the item the user selected.
-   *
-   * The pictures of a note are attachments of their own, which a Markdown
-   * reader cannot open. They go into the workspace first, and the note is
-   * converted with their new addresses in place — see `item-pictures.js`.
-   *
-   * @param {Object} item - a regular item
-   * @returns {Promise<String[]>}
-   */
-  async _itemNotes(item) {
-    let ids = [];
-    try {
-      ids = (item && item.getNotes && item.getNotes()) || [];
-    }
-    catch (e) {
-      // A note or attachment was handed in: it has no child notes.
-      ids = [];
-    }
-    if (!ids.length) {
-      return [];
-    }
-    const notes = await this._loadItems(ids);
-    const collected = [];
-    for (const note of notes) {
-      if (!note) {
-        continue;
-      }
-      let html = "";
-      try {
-        html = note.getNote() || "";
-      }
-      catch (e) {
-        html = "";
-      }
-      const assets = await this._noteImageAssets(
-        html,
-        Number(note.libraryID) || 0,
-      );
-      const markdown = noteHtmlToMarkdown(rewriteNoteImages(html, assets));
-      if (markdown) {
-        collected.push(markdown);
-      }
-    }
-    return collected;
-  },
-
-  /**
    * Put item-level Markdown where the settings say notes go.
    *
    * The whole write — resolving the destination, reading the block it
@@ -148,6 +96,9 @@ export default {
    *   the target document is replaced, so sending twice does not duplicate
    * @param {Object} [options.attrs] - block attributes for the super block
    *   this write becomes; the item sync uses them to find itself again
+   * @param {Boolean} [options.emptyOk] - run the destination and the
+   *   follow-up even when there is no text for the document itself; the
+   *   notes written as child documents need the parent to exist
    * @returns {Promise<Object|null>} what the write answered
    */
   async _sendItemMarkdown(
@@ -159,11 +110,12 @@ export default {
       section = "",
       attrs = null,
       quiet = false,
+      emptyOk = false,
       followUp = null,
     } = {},
   ) {
     const text = String(markdown || "").trim();
-    if (!text) {
+    if (!text && !(emptyOk && typeof followUp === "function")) {
       return null;
     }
     // The same lock the annotation sends use: an item write and a batch
@@ -265,6 +217,21 @@ export default {
       destination = itemDocument
         ? await this._resolveItemDocument(notebook, resolved)
         : await this._resolveDestination({ notebook, vars: resolved });
+      if (!text) {
+        // Nothing belongs in the document itself, but the follow-up — the
+        // notes that become its child documents — still needs it to exist.
+        // Resolving the destination above created it when it was missing.
+        return {
+          transport: "",
+          // The document itself is what "open in SiYuan" should open when
+          // there is no block of its own to point at.
+          blockID: destination.documentID || "",
+          documentID: destination.documentID || "",
+          blocks: [],
+          destination,
+          empty: true,
+        };
+      }
       // The old block can only be read when the document is known. For a
       // daily note the CLI resolves (and, if needed, creates) today's note;
       // without the CLI there is nothing to scope the search to, and the
@@ -303,7 +270,10 @@ export default {
         );
         if (attempt.updated) {
           const kept = {
-            transport: "the block was updated in place",
+            transport: getString(
+              "zoteroSiYuan-transport-updated",
+              "updated in place",
+            ),
             blockID: previous[0],
             documentID: documentID || destination.documentID || "",
             blocks: [previous[0]],
@@ -506,12 +476,18 @@ export default {
     const vars = await this._itemVars(item, pdfs[0] || null);
     const itemKey = String(vars.itemKey || vars.attachmentKey || "");
     const libraryID = Number(vars.libraryID) || 0;
+    // "Notes as documents": each child note gets a document of its own
+    // under this item's document instead of a section inside it.
+    const notesAsDocuments = prefFlag("itemNotesAsSubdocs", false);
     // The notes may bring pictures with them; the whole sync is one unit,
     // so the pictures are held until both halves have written.
     const written = await this._withItemPictures(async () => {
-      const notes = await this._itemNotes(item);
-      const text = this._itemSectionMarkdown(vars, notes);
-      if (!text) {
+      const entries = await this._itemNoteEntries(item);
+      const text = this._itemSectionMarkdown(
+        vars,
+        notesAsDocuments ? [] : entries.map((entry) => entry.markdown),
+      );
+      if (!text && !notesAsDocuments) {
         this._notifyItemInfo(
           getString(
             "zoteroSiYuan-item-no-content",
@@ -520,15 +496,18 @@ export default {
         );
         return null;
       }
-      // The bubble is shown once, at the end: the annotations belong to the
-      // same answer, and two bubbles for one command read as two commands.
-      // The annotations are written by the follow-up, while the send lock is
-      // still held — the two halves of the sync are one unit.
+      // The bubble is shown once, at the end: the notes and the annotations
+      // belong to the same answer, and two bubbles for one command read as
+      // two commands. Both are written by the follow-up, while the send lock
+      // is still held — the halves of the sync are one unit.
       return await this._sendItemMarkdown(item, text, {
         itemDocument: true,
         vars,
         attrs: itemDocumentAttributes(itemKey, libraryID),
         quiet: true,
+        // With notes as documents the item's own document can be empty;
+        // it still has to exist, because the notes are its children.
+        emptyOk: notesAsDocuments,
         followUp: async (result) => {
           const destination = result.destination || {
             kind: "item",
@@ -536,7 +515,36 @@ export default {
             title: String(vars.title || ""),
           };
           const documentID = destination.documentID || result.documentID || "";
-          if (!documentID || !prefFlag("itemSyncAnnotations", true)) {
+          if (!documentID) {
+            return;
+          }
+          try {
+            const notebook = await this._resolveNotebook();
+            // An empty entry list is deliberate when the setting is off: it
+            // takes back the documents a previous sync made.
+            const synced = await this._syncItemNoteDocuments({
+              itemDocumentID: documentID,
+              notebook,
+              entries: notesAsDocuments ? entries : [],
+              vars,
+              itemKey,
+              libraryID,
+            });
+            if (synced && synced.summary) {
+              result.noteDocumentSummary = synced.summary;
+            }
+          }
+          catch (e) {
+            Zotero.logError(
+              `ZoteroSiYuan: the notes could not be synced as documents: ${e}`,
+            );
+            result.noteDocumentWarning = getString(
+              "zoteroSiYuan-item-note-docs-sync-failed",
+              "The notes could not be synced as documents; the details are " +
+                "in SiYuan.",
+            );
+          }
+          if (!prefFlag("itemSyncAnnotations", true)) {
             return;
           }
           try {

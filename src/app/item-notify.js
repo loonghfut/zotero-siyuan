@@ -21,11 +21,14 @@ export default {
         : "") ||
       (written && written.documentID) ||
       "SiYuan";
-    // A literature-note sync has a second half to report: what happened to
-    // the annotations. It belongs in the same bubble, not in a second one.
+    // A literature-note sync has more to report: what happened to the
+    // annotations, and to the notes that became documents of their own.
+    // They belong in the same bubble, not in three.
     const extra = [
       written && written.annotationSummary,
       written && written.annotationWarning,
+      written && written.noteDocumentSummary,
+      written && written.noteDocumentWarning,
     ]
       .filter(Boolean)
       .join("\n");

@@ -244,7 +244,7 @@ appendPicture(text, image)    图片 Markdown 插到正文        ← _buildCont
 | `_sendItemAbstract` | `abstractMarkdown(vars, abstract, itemAbstractTemplate)` |
 | `_sendItemNotes` | 子笔记 HTML → Markdown（`noteHtmlToMarkdown`），按 `itemNotesTemplate` 逐条渲染 |
 | `_sendItemAnnotations` | 汇总各 PDF 的注释 key，交给 `_sendMany`（和阅读器批量同一条路） |
-| `_syncItemDocument` | 固定走 `_resolveItemDocument`，把信息/摘要/笔记写进这篇文献的文档，随后增量同步注释 |
+| `_syncItemDocument` | 固定走 `_resolveItemDocument`，把信息/摘要/笔记写进这篇文献的文档，随后增量同步注释；`itemNotesAsSubdocs = "1"` 时笔记改为各建一篇子文档 |
 
 前四个入口在 `app/item-actions.js`，写入本身仍在 `_sendItemMarkdown`。
 
@@ -341,6 +341,30 @@ workspace。`modules/note-images.js` 只从 HTML 里认图片（`noteImageRefs`�
 `custom-zotero-*`）永远不会被同步删掉。新块的 ID 优先来自写入返回的 `blockRows`；
 取不到时等 1200 ms 重新查一次（索引滞后），仍取不到也不算失败——下一次同步会找到它。
 偏好 `itemSyncAnnotations = "0"` 关掉这一段，只写信息/摘要/笔记。
+
+#### 子笔记作为子文档（`app/item-note-docs.js` + `app/note-documents.js`）
+
+偏好 `itemNotesAsSubdocs = "1"` 时，「同步这篇文献」不再把子笔记写进文献文档的笔记区段，
+而是在**同一个发送锁**里（`_sendItemMarkdown` 的 `followUp`）为每条 Zotero 子笔记建一篇
+思源文档，父路径是文献文档的文档 ID（CLI `document create --path /<文档 ID>`；HTTP 退回
+`createDocWithMd`，先按 `hpath` 查父文档）。信息/摘要仍然整体留在文献文档里；如果它们
+都没有，`emptyOk` 让 `_writeItemMarkdown` 只解析（必要时创建）文献文档就返回，不写空块。
+
+子文档的文档属性和里面那一个超级块都带 `custom-zsi-section="note-document"`、
+`custom-zsi-item-key`、`custom-zotero-note-key`（笔记 key）、修改时间和模板指纹——但**不带**
+`custom-zotero-item-key`，否则 `_findItemDocument` 会把它当成文献文档本身。
+
+| 情况 | 处理 |
+|---|---|
+| 以前没写过 | `document create`（markdown 里已经带属性），再 `attr set` 给文档本身打属性 |
+| 笔记或模板变了 | 找到文档里那一个块，`_replaceItemSection` 原地改写；块 ID 不变 |
+| 原地改写被拒 | 新块写入成功后删旧块（和注释同一条路） |
+| 笔记第一行变了 | `document rename` 跟着改名（失败不影响同步） |
+| 笔记已不在库里 | `document remove --id` / `/api/filetree/removeDocByID` 删除文档（进回收站） |
+| 开关关掉 | 传空清单，把所有 `note-document` 子文档收回，笔记重新写回文献文档 |
+
+查询同时认 item key 和 section，所以用户手写的同名文档不会被删除或改写。文档不是块，
+删除必须走文档接口（`block delete` 会拒绝文档 ID）。
 
 ---
 

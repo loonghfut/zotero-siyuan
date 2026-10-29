@@ -176,3 +176,22 @@ export function getString(id, fallback) {
 	}
 	return fallback || id;
 }
+
+/**
+ * Fill the `%s` placeholders of a message, in order.
+ *
+ * Fluent has placeables of its own, but the plugin's messages are plain
+ * text with `%s` — including the ones the preferences pane resolves itself
+ * — so the substitution lives here instead of in every caller.
+ *
+ * @param {String} message
+ * @param {...*} values
+ * @returns {String}
+ */
+export function fill(message, ...values) {
+	let text = String(message);
+	for (const value of values) {
+		text = text.replace("%s", String(value));
+	}
+	return text;
+}

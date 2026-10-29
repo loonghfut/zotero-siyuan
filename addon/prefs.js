@@ -45,6 +45,10 @@ pref("itemNotesTemplate", "");
 // changed ones are updated in place, and the notes of deleted annotations
 // are removed. "0" keeps the sync to information / abstract / notes.
 pref("itemSyncAnnotations", "1");
+// "1" puts each child note into a document of its own, under the item's
+// document, instead of into a notes section inside it. "0" keeps the notes
+// inline. Turning it off again takes the sub-documents back on the next sync.
+pref("itemNotesAsSubdocs", "0");
 // The templates the user saved for later: a JSON array of
 // { "id": …, "name": …, "template": … }. Empty = none saved yet.
 pref("templates", "[]");

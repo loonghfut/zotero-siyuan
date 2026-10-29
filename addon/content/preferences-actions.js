@@ -84,6 +84,12 @@ Object.assign(ZoteroSiYuanPreferences, {
     if (sent) {
       sent.value = String(addon.getPref("sentAction", "ask") || "ask");
     }
+    var subdocs = document.getElementById(this.ITEM_NOTES_SUBDOCS_ID);
+    if (subdocs) {
+      subdocs.checked = addon.isPrefTrue
+        ? addon.isPrefTrue("itemNotesAsSubdocs")
+        : String(addon.getPref("itemNotesAsSubdocs", "0")) === "1";
+    }
     this._syncDestinationFields();
   },
 
@@ -115,6 +121,14 @@ Object.assign(ZoteroSiYuanPreferences, {
     var addon = Zotero.ZoteroSiYuan;
     if (addon && addon.setPref) {
       addon.setPref("sentAction", String(value || "ask"));
+    }
+  },
+
+  /** Whether a child note becomes a document under the item's document. */
+  _saveItemNotesSubdocs: function (checked) {
+    var addon = Zotero.ZoteroSiYuan;
+    if (addon && addon.setPref) {
+      addon.setPref("itemNotesAsSubdocs", checked ? "1" : "0");
     }
   },
 
@@ -373,7 +387,12 @@ Object.assign(ZoteroSiYuanPreferences, {
     );
     try {
       if (!Zotero.ZoteroSiYuan || !Zotero.ZoteroSiYuan.refreshIndex) {
-        throw new Error("The plugin is not running. Restart Zotero and try again.");
+        throw new Error(
+          this._text(
+            "zoteroSiYuan-error-plugin-not-running",
+            "The plugin is not running. Restart Zotero and try again.",
+          ),
+        );
       }
       var count = await Zotero.ZoteroSiYuan.refreshIndex();
       this._setResult(
@@ -401,7 +420,10 @@ Object.assign(ZoteroSiYuanPreferences, {
     try {
       if (!Zotero.ZoteroSiYuan || !Zotero.ZoteroSiYuan.selfTest) {
         throw new Error(
-          "The plugin is not running. Restart Zotero and try again.",
+          this._text(
+            "zoteroSiYuan-error-plugin-not-running",
+            "The plugin is not running. Restart Zotero and try again.",
+          ),
         );
       }
       // The pane's button honours the same `selfTestWrite` switch the
@@ -437,7 +459,10 @@ Object.assign(ZoteroSiYuanPreferences, {
     try {
       if (!Zotero.ZoteroSiYuan || !Zotero.ZoteroSiYuan.diagnose) {
         throw new Error(
-          "The plugin is not running. Restart Zotero and try again.",
+          this._text(
+            "zoteroSiYuan-error-plugin-not-running",
+            "The plugin is not running. Restart Zotero and try again.",
+          ),
         );
       }
       var report = await Zotero.ZoteroSiYuan.diagnose();

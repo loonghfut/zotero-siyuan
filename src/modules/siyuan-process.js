@@ -6,6 +6,7 @@
  * use. Knowing *what* to ask SiYuan belongs to `siyuan.js`, which extends this.
  */
 
+import { fill, getString } from "../utils/locale.js";
 import {
   firstOf,
   homeDir,
@@ -166,7 +167,14 @@ export class SiYuanProcess {
       // nothing ran, so a second attempt cannot write anything twice.
       if (e && e.errorCode) {
         throw new Error(
-          `Could not run the SiYuan CLI at "${command}": ${e.message}`,
+          fill(
+            getString(
+              "zoteroSiYuan-error-cli-spawn",
+              "Could not run the SiYuan CLI at “%s”: %s",
+            ),
+            command,
+            e.message,
+          ),
         );
       }
       // The Subprocess module is not reachable from this scope — fall back
@@ -211,10 +219,15 @@ export class SiYuanProcess {
     }
     catch (e2) {
       const error = new Error(
-        `Could not run the SiYuan CLI at "${command}": ${e2.message} ` +
-          `(first attempt: ${
-            firstError && firstError.message ? firstError.message : firstError
-          })`,
+        fill(
+          getString(
+            "zoteroSiYuan-error-cli-spawn-twice",
+            "Could not run the SiYuan CLI at “%s”: %s (first attempt: %s)",
+          ),
+          command,
+          e2.message,
+          firstError && firstError.message ? firstError.message : firstError,
+        ),
       );
       if (mutating) {
         markWriteUnknown(error);
@@ -264,7 +277,13 @@ export class SiYuanProcess {
           // already gone
         }
         const error = new Error(
-          `the siyuan CLI did not answer within ${COMMAND_TIMEOUT} ms`,
+          fill(
+            getString(
+              "zoteroSiYuan-error-cli-timeout",
+              "The siyuan CLI did not answer within %s ms.",
+            ),
+            COMMAND_TIMEOUT,
+          ),
         );
         error.timedOut = true;
         reject(error);
@@ -293,7 +312,13 @@ export class SiYuanProcess {
     }
     if (!output) {
       throw new Error(
-        `The siyuan CLI returned no output for: siyuan ${args.join(" ")}`,
+        fill(
+          getString(
+            "zoteroSiYuan-error-cli-no-output",
+            "The siyuan CLI returned no output for: siyuan %s",
+          ),
+          args.join(" "),
+        ),
       );
     }
     try {
@@ -301,7 +326,13 @@ export class SiYuanProcess {
     }
     catch (e) {
       throw new Error(
-        `Could not parse the siyuan CLI output: ${output.slice(0, 300)}`,
+        fill(
+          getString(
+            "zoteroSiYuan-error-cli-bad-output",
+            "Could not parse the siyuan CLI output: %s",
+          ),
+          output.slice(0, 300),
+        ),
       );
     }
   }
@@ -328,7 +359,13 @@ export class SiYuanProcess {
       // The fallback transport cannot tell a silent success from a failure,
       // so an empty answer is treated as a failure.
       throw new Error(
-        `The siyuan CLI returned no output for: siyuan ${args.join(" ")}`,
+        fill(
+          getString(
+            "zoteroSiYuan-error-cli-no-output",
+            "The siyuan CLI returned no output for: siyuan %s",
+          ),
+          args.join(" "),
+        ),
       );
     }
     return output;
@@ -352,9 +389,19 @@ export class SiYuanProcess {
         .join(" ");
     }
     if (!message) {
-      message = `exit code ${code}`;
+      message = fill(
+        getString("zoteroSiYuan-error-cli-exit-code", "exit code %s"),
+        code,
+      );
     }
-    return `siyuan ${args.join(" ")} failed: ${message}`;
+    return fill(
+      getString(
+        "zoteroSiYuan-error-cli-command-failed",
+        "siyuan %s failed: %s",
+      ),
+      args.join(" "),
+      message,
+    );
   }
 
   /* -------------------------------------------------------- executable */
@@ -485,10 +532,18 @@ export class SiYuanProcess {
     }
 
     throw new Error(
-      "Could not find the siyuan CLI. It ships with SiYuan 3.7+ " +
-        "(Windows: %LOCALAPPDATA%\\Programs\\SiYuan\\resources\\kernel\\siyuan.exe). " +
-        "Leave the CLI path empty to auto-detect it, or set the full path to siyuan.exe." +
-        (failures.length ? "\nTried:\n  " + failures.join("\n  ") : ""),
+      getString(
+        "zoteroSiYuan-error-cli-not-found",
+        "Could not find the siyuan CLI. It ships with SiYuan 3.7 or later " +
+          "(on Windows: %LOCALAPPDATA%\\Programs\\SiYuan\\resources\\kernel\\siyuan.exe). " +
+          "Leave the CLI path empty to find it automatically, or set the full path to siyuan.exe.",
+      ) +
+        (failures.length
+          ? "\n" +
+            getString("zoteroSiYuan-error-tried", "Tried:") +
+            "\n  " +
+            failures.join("\n  ")
+          : ""),
     );
   }
 

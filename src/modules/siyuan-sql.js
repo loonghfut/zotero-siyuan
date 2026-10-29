@@ -6,6 +6,8 @@
  * in one place instead of one importing the other.
  */
 
+import { fill, getString } from "../utils/locale.js";
+
 /**
  * A SiYuan timestamp: `YYYYMMDDHHMMSS`, in local time.
  * @param {Date} [date]
@@ -33,7 +35,12 @@ export function sqlString(value) {
 export function sqlID(value) {
   const text = String(value == null ? "" : value).trim();
   if (!/^[0-9A-Za-z-]+$/.test(text)) {
-    throw new Error(`"${text}" is not a block id`);
+    throw new Error(
+      fill(
+        getString("zoteroSiYuan-error-invalid-block-id", "“%s” is not a block id"),
+        text,
+      ),
+    );
   }
   return text;
 }

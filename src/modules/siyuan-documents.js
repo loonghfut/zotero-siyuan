@@ -7,6 +7,7 @@
  * are mixed into `SiYuanCLI`, so a caller still uses one client.
  */
 
+import { fill, getString } from "../utils/locale.js";
 import {
   documentIDOf,
   isBlockID,
@@ -118,11 +119,21 @@ export default {
    */
   async createDocument(notebookID, title, { path = "/", markdown = "" } = {}) {
     if (!notebookID) {
-      throw new Error("No SiYuan notebook was given.");
+      throw new Error(
+        getString(
+          "zoteroSiYuan-error-no-notebook-given",
+          "No SiYuan notebook was given.",
+        ),
+      );
     }
     const name = String(title || "").trim();
     if (!name) {
-      throw new Error("A document needs a title.");
+      throw new Error(
+        getString(
+          "zoteroSiYuan-error-document-needs-title",
+          "A document needs a title.",
+        ),
+      );
     }
     const args = [
       "document",
@@ -131,9 +142,13 @@ export default {
       notebookID,
       "--title",
       name,
-      "--path",
-      String(path || "/").trim() || "/",
     ];
+    // Passing "/" explicitly is rejected as "block not found" by the CLI,
+    // while leaving the flag out means the same thing: the notebook root.
+    const parent = String(path || "/").trim();
+    if (parent && parent !== "/") {
+      args.push("--path", parent);
+    }
     if (String(markdown || "")) {
       args.push("--markdown", String(markdown));
     }
@@ -150,7 +165,13 @@ export default {
       return found;
     }
     throw new Error(
-      `siyuan document create did not answer with a document id: ${String(output).slice(0, 200)}`,
+      fill(
+        getString(
+          "zoteroSiYuan-error-cli-no-doc-id",
+          "The siyuan CLI did not answer with a document id: %s",
+        ),
+        String(output).slice(0, 200),
+      ),
     );
   },
 
@@ -233,7 +254,15 @@ export default {
   async findBlockRowsSince(documentID, since) {
     const root = sqlID(documentID);
     if (!/^[0-9]{14}$/.test(String(since))) {
-      throw new Error(`"${since}" is not a SiYuan timestamp`);
+      throw new Error(
+        fill(
+          getString(
+            "zoteroSiYuan-error-invalid-timestamp",
+            "“%s” is not a SiYuan timestamp",
+          ),
+          since,
+        ),
+      );
     }
     const rows = await this.runJSON([
       "sql",
@@ -298,5 +327,42 @@ export default {
         await this.deleteBlock(id);
       }
     }
+  },
+
+  /**
+   * Remove a document.
+   *
+   * A document is not a block: `block delete` refuses it. The document has a
+   * command of its own, and it moves the document to SiYuan's trash — the
+   * user can still get it back.
+   *
+   * @param {String} documentID
+   * @returns {Promise<void>}
+   */
+  async deleteDocument(documentID) {
+    const id = sqlID(documentID);
+    await this.runRaw(["document", "remove", "--id", id], { mutating: true });
+  },
+
+  /**
+   * Give a document a new title.
+   *
+   * Used when a child note's first line changed: the sub-document keeps its
+   * id (and everything that links to it), only the name follows the note.
+   *
+   * @param {String} documentID
+   * @param {String} title
+   * @returns {Promise<void>}
+   */
+  async renameDocument(documentID, title) {
+    const id = sqlID(documentID);
+    const name = String(title || "").trim();
+    if (!name) {
+      return;
+    }
+    await this.runRaw(
+      ["document", "rename", "--id", id, "--title", name],
+      { mutating: true },
+    );
   },
 };

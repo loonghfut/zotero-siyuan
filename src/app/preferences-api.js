@@ -2,7 +2,7 @@
  * Zotero → SiYuan — the surface the preferences pane calls, and prefs access.
  */
 
-import { getString } from "../utils/locale.js";
+import { fill, getString } from "../utils/locale.js";
 import {
 	getPref,
 	prefFlag,
@@ -109,8 +109,14 @@ export default {
       }
       catch (httpError) {
         throw new Error(
-          `the siyuan CLI failed: ${cliError.message} — ` +
-            `the SiYuan HTTP API failed too: ${httpError.message}`,
+          fill(
+            getString(
+              "zoteroSiYuan-error-both-transports",
+              "the siyuan CLI failed: %s — the SiYuan HTTP API failed too: %s",
+            ),
+            cliError.message,
+            httpError.message,
+          ),
         );
       }
     }
@@ -264,8 +270,14 @@ export default {
     const missing = missingBodyVariable(slot, template);
     if (missing) {
       result.problems.push(
-        `the body is missing — add {{${missing}}}, or the content of this ` +
-          "section is not written",
+        fill(
+          getString(
+            "zoteroSiYuan-template-problem-no-body",
+            "the body is missing — add {{%s}}, or the content of this " +
+              "section is not written",
+          ),
+          missing,
+        ),
       );
     }
     return result;
